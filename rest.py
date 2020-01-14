@@ -164,27 +164,11 @@ Remove "password" field if no authentication needed.
 def get_token(ip, password):
     rest = RestAPI(url=ip, password=password, auth_host=ip)
     print rest.get_token()
-    #body = {"qgaIsLive": {}}
-                #"cmd":"ip -o link show | grep 02:ff:04:b8:a5:4a | cut -d ':' -f 2 | tr -d ' ' | tr -d '\n'",
-    #body = {
-    #"qga": {
-    #    "async": False,
-    #    "timeout": 120,
-    #    "cmd": {
-    #        "execute": "guest-network-get-interfacesd",
-    #        "arguments": {
-    #            "id":"xxx"
-    #        }
-    #    }
-    #}
-    #}
 
 def main(args):
     config_file = args[1]
     text = read_comment_json(config_file)
     config = json.loads(text)
-    #with open(config_file, 'r') as f:
-    #    config = json.load(f)
 
     if config is not None:
         if config.has_key('password'):
