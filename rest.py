@@ -41,7 +41,7 @@ class RestAPI():
                            'domain': { \
                              'name': "Default" \
                            }, \
-                           'name': "admin" \
+                           'name': self.project \
                         } \
                        } \
                      } \
@@ -61,11 +61,13 @@ class RestAPI():
             header_str += '-H "%s:%s" ' % (key, value)
         print ("curl -X POST %s %s-d '%s'" % (auth_url, header_str, json.dumps(body)))
         res = requests.post(auth_url, data=json.dumps(body), headers=self.headers)
+        if res.status_code == 401:
+            return None
         if (self.version == 'v2'):
             token = json.loads(res.text)
             self.token = token['access']['token']['id']
         else:
-            self.token = res.headers['X-Subject-Token']
+            self.token = res.headers['x-subject-token']
         self.headers['X-Auth-Token'] = self.token
         return self.token
     
@@ -164,17 +166,41 @@ Remove "password" field if no authentication needed.
 def get_token(ip, password):
     rest = RestAPI(url=ip, password=password, auth_host=ip)
     print rest.get_token()
+    #body = {"qgaIsLive": {}}
+                #"cmd":"ip -o link show | grep 02:ff:04:b8:a5:4a | cut -d ':' -f 2 | tr -d ' ' | tr -d '\n'",
+    #body = {
+    #"qga": {
+    #    "async": False,
+    #    "timeout": 120,
+    #    "cmd": {
+    #        "execute": "guest-network-get-interfacesd",
+    #        "arguments": {
+    #            "id":"xxx"
+    #        }
+    #    }
+    #}
+    #}
 
 def main(args):
     config_file = args[1]
     text = read_comment_json(config_file)
     config = json.loads(text)
+    #with open(config_file, 'r') as f:
+    #    config = json.load(f)
 
     if config is not None:
+        if config.has_key('user'):
+            user = config['user'].encode("utf-8")
+        else:
+            user = 'admin'
         if config.has_key('password'):
             password = config['password'].encode("utf-8")
         else:
             password = None
+        if config.has_key('project'):
+            project = config['project'].encode("utf-8")
+        else:
+            project = 'admin'
         if config.has_key('version'):
             version = config['version']
         else:
@@ -192,7 +218,7 @@ def main(args):
         body = config['body']
         method = config['method'].encode("utf-8")
         
-        rest = RestAPI(host, password=password, version=version, auth_host=auth_host, auth_port=auth_port)
+        rest = RestAPI(host, user=user, password=password, project=project, version=version, auth_host=auth_host, auth_port=auth_port)
 
         if config.has_key('port'):
             port = config['port']

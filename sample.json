@@ -1,6 +1,7 @@
 {
 "host": "10.10.10.1",
 "password": "your-password",
+"auth_host": "10.10.10.1",
 "auth_port": "auth-port-incase-it-different-with-api-port",
 "port": "api-port",
 "method": "get/put/post",
