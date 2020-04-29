@@ -4,6 +4,7 @@ import requests
 import json
 import sys
 import re
+import getopt
 
 class RestAPI():
     def __init__(self, url, password, auth_host, user='admin', project ='admin', version='v2', auth_port='35357'):
@@ -18,6 +19,8 @@ class RestAPI():
         self.headers = {'Content-Type': 'application/json'}
 
     def get_token(self):
+        if self.token:
+            return
         if self.password is None:
             return
         if (self.version == 'v3'):
@@ -73,6 +76,7 @@ class RestAPI():
     
     def get_resource(self, url):
         self.get_token()
+        self.headers['X-Auth-Token'] = self.token
         header_str = ''
         for (key,value) in self.headers.items():
             header_str += '-H "%s:%s" ' % (key, value)
@@ -85,6 +89,7 @@ class RestAPI():
 
     def set_resource(self, url, body):
         self.get_token()
+        self.headers['X-Auth-Token'] = self.token
         header_str = ''
         for (key,value) in self.headers.items():
             header_str += '-H "%s:%s" ' % (key, value)
@@ -97,6 +102,7 @@ class RestAPI():
 
     def update_resource(self, url, body):
         self.get_token()
+        self.headers['X-Auth-Token'] = self.token
         header_str = ''
         for (key,value) in self.headers.items():
             header_str += '-H "%s:%s" ' % (key, value)
@@ -109,6 +115,7 @@ class RestAPI():
 
     def delete_resource(self, url, body=None):
         self.get_token()
+        self.headers['X-Auth-Token'] = self.token
         if body is not None:
             payload = json.dumps(body)
         else:
@@ -143,13 +150,20 @@ def read_comment_json(file):
     return text
 
 def usage_prompt():
-    return """
-Usage: please specify the config file with context like following:
+    print """
+Usage:
+    python rest.py [-h <ip> [-p <password>]] -f sample.json
+
+Define json file with context like following:
 
 {
-"password": "yourname",
-"host": "ip addresss",
-"type": "networks, ports, servers, etc.",
+"user": "auth_user",
+# Support comment per line
+# Remove "password" field if no authentication needed.
+"password": "password",
+"auth_host": "auth host ip",
+"project": "project",
+"host": "api host ip",
 "method": "get, set",
 "api": "/servers/befe0603-0d7d-4520-9d5b-b8624cb88545/action",
 "body":
@@ -160,33 +174,52 @@ Usage: please specify the config file with context like following:
 
 }
 
-Remove "password" field if no authentication needed.
 """
 
 def get_token(ip, password):
     rest = RestAPI(url=ip, password=password, auth_host=ip)
     print rest.get_token()
-    #body = {"qgaIsLive": {}}
-                #"cmd":"ip -o link show | grep 02:ff:04:b8:a5:4a | cut -d ':' -f 2 | tr -d ' ' | tr -d '\n'",
-    #body = {
-    #"qga": {
-    #    "async": False,
-    #    "timeout": 120,
-    #    "cmd": {
-    #        "execute": "guest-network-get-interfacesd",
-    #        "arguments": {
-    #            "id":"xxx"
-    #        }
-    #    }
-    #}
-    #}
 
-def main(args):
-    config_file = args[1]
+def get_token_remote(host, password):
+    import paramiko
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    ssh.connect(hostname=host, port=22, username='root', password=password)
+    cmd = "source ArcherAdmin-openrc; openstack token issue | sed -n '5p' | awk -F '|' '{print $3}' | tr -d ' ' | tr -d '\n'"
+    stdin, stdout, stderr = ssh.exec_command(cmd)
+    return stdout.read().decode()
+
+def main(argv):
+    config_file = None
+    host = None
+    password = None
+    try:
+        opts, args = getopt.getopt(argv, "h:f:p:")
+    except getopt.GetoptError:
+        usage_prompt()
+        sys.exit(2)
+    for opt, arg in opts:
+        if opt == '-h':
+            host = arg
+        elif opt == '-p':
+            password = arg
+        elif opt == '-f':
+            config_file = arg
+    if host:
+        if not password:
+            if sys.version_info.major == 2:
+                password = raw_input('SSH - Please input password for root:')
+            else:
+                password = input('SSH - Please input password for root:')
+        token = get_token_remote(host, password)
+        print("Auth-Token: ", token)
+
+    if not config_file:
+        usage_prompt()
+        sys.exit(2)
+
     text = read_comment_json(config_file)
     config = json.loads(text)
-    #with open(config_file, 'r') as f:
-    #    config = json.load(f)
 
     if config is not None:
         if config.has_key('user'):
@@ -219,6 +252,8 @@ def main(args):
         method = config['method'].encode("utf-8")
         
         rest = RestAPI(host, user=user, password=password, project=project, version=version, auth_host=auth_host, auth_port=auth_port)
+        if token:
+            rest.token=token
 
         if config.has_key('port'):
             port = config['port']
@@ -246,8 +281,8 @@ def main(args):
 
 if __name__ == '__main__':
     if (len(sys.argv) < 2):
-        print usage_prompt()
+        usage_prompt()
     elif sys.argv[1] == 'token':
         get_token(sys.argv[2], sys.argv[3])
     else:
-        main(sys.argv)
+        main(sys.argv[1:])
