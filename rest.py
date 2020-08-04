@@ -176,8 +176,8 @@ Define json file with context like following:
 
 """
 
-def get_token(ip, password):
-    rest = RestAPI(url=ip, password=password, auth_host=ip)
+def get_token(ip, user='admin', password='admin'):
+    rest = RestAPI(url=ip, user=user, password=password, auth_host=ip)
     print rest.get_token()
 
 def get_token_remote(host, password):
@@ -193,6 +193,7 @@ def main(argv):
     config_file = None
     host = None
     password = None
+    token = None
     try:
         opts, args = getopt.getopt(argv, "h:f:p:")
     except getopt.GetoptError:
@@ -250,7 +251,7 @@ def main(argv):
         api = config['api'].encode("utf-8")
         body = config['body']
         method = config['method'].encode("utf-8")
-        
+
         rest = RestAPI(host, user=user, password=password, project=project, version=version, auth_host=auth_host, auth_port=auth_port)
         if token:
             rest.token=token
@@ -283,6 +284,6 @@ if __name__ == '__main__':
     if (len(sys.argv) < 2):
         usage_prompt()
     elif sys.argv[1] == 'token':
-        get_token(sys.argv[2], sys.argv[3])
+        get_token(sys.argv[2], sys.argv[3], sys.argv[4])
     else:
         main(sys.argv[1:])
