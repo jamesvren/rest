@@ -3,6 +3,7 @@
 import requests
 import json
 import sys
+import os
 import re
 import getopt
 
@@ -48,7 +49,7 @@ class RestAPI():
                         } \
                        } \
                      } \
-                   } 
+                   }
         else:
             auth_url = 'http://%s:%s/v2.0/tokens' % (self.auth_host, self.auth_port)
             body = { 'auth': {  \
@@ -73,7 +74,7 @@ class RestAPI():
             self.token = res.headers['x-subject-token']
         self.headers['X-Auth-Token'] = self.token
         return self.token
-    
+
     def get_resource(self, url):
         self.get_token()
         self.headers['X-Auth-Token'] = self.token
@@ -165,15 +166,23 @@ Define json file with context like following:
 "project": "project",
 "host": "api host ip",
 "method": "get, set",
-"api": "/servers/befe0603-0d7d-4520-9d5b-b8624cb88545/action",
+"api": "/url",
 "body":
 {
-    "your post body": {
+    "post body": {
     }
 }
 
 }
 
+Create auth.json in same dir with rest.py if want to use auth info for all requests:
+{
+"user": "admin",
+"password": "password",
+"project": "admin",
+"auth_host": "x.x.x.x",
+"auth_port": "x"
+}
 """
 
 def get_token(ip, user='admin', password='admin'):
@@ -223,34 +232,45 @@ def main(argv):
     config = json.loads(text)
 
     if config is not None:
-        if config.has_key('user'):
-            user = config['user'].encode("utf-8")
-        else:
-            user = 'admin'
-        if config.has_key('password'):
-            password = config['password'].encode("utf-8")
-        else:
-            password = None
-        if config.has_key('project'):
-            project = config['project'].encode("utf-8")
-        else:
-            project = 'admin'
-        if config.has_key('version'):
-            version = config['version']
-        else:
-            version = 'v2'
-        if config.has_key('auth_port'):
-            auth_port = config['auth_port']
-        else:
-            auth_port = '35357'
         host = config['host'].encode("utf-8")
-        if config.has_key('auth_host'):
-            auth_host= config['auth_host'].encode("utf-8")
-        else:
-            auth_host = host
         api = config['api'].encode("utf-8")
         body = config['body']
         method = config['method'].encode("utf-8")
+
+    auth_config = None
+    path = os.path.dirname(os.path.abspath(__file__))
+    auth_file = path + '/auth.json'
+    if os.path.exists(auth_file):
+        auth_text = read_comment_json(auth_file)
+        auth_config = json.loads(auth_text)
+    if not auth_config:
+        auth_config = config
+
+    if auth_config is not None:
+        if auth_config.has_key('user'):
+            user = auth_config['user'].encode("utf-8")
+        else:
+            user = 'admin'
+        if auth_config.has_key('password'):
+            password = auth_config['password'].encode("utf-8")
+        else:
+            password = None
+        if auth_config.has_key('project'):
+            project = auth_config['project'].encode("utf-8")
+        else:
+            project = 'admin'
+        if auth_config.has_key('version'):
+            version = auth_config['version']
+        else:
+            version = 'v2'
+        if auth_config.has_key('auth_port'):
+            auth_port = auth_config['auth_port']
+        else:
+            auth_port = '35357'
+        if auth_config.has_key('auth_host'):
+            auth_host = auth_config['auth_host'].encode("utf-8")
+        else:
+            auth_host = host
 
         rest = RestAPI(host, user=user, password=password, project=project, version=version, auth_host=auth_host, auth_port=auth_port)
         if token:
