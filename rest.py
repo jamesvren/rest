@@ -48,11 +48,12 @@ def main():
     parser.add_argument('--password', help='Password to login host')
     parser.add_argument('--debug', action='store_true', help='Output curl command for each request')
     parser.add_argument('-g', '--gen-auth', action='store_true', help='Generate authenticate file')
-    parser.add_argument('-i', '--interface', metavar='HOST', help='Get vrouter interface in the host')
+    parser.add_argument('-i', '--interface', metavar='HOST', nargs='+', help='Get vrouter interface in the host')
     def cmd_file(args):
         debug_out('cmd_file: ', args)
         if args.interface:
-            vr_interface(args.interface)
+            for ip in args.interface:
+                vr_interface(ip)
             return
         if args.gen_auth:
             auth_host = args.host if args.host else '127.0.0.1'
@@ -116,30 +117,33 @@ def vr_interface(vrouter_ip):
     import xml.etree.ElementTree as ET
     from prettytable import PrettyTable
 
+    debug_out('vr_interface: ', vrouter_ip)
     vm_info = PrettyTable()
-    vm_info.field_names = ["Compute Node", "VM Name", "VM IP Address", "Link-Local Address"]
+    vm_info.field_names = ["VRouter", "VM Name", "VM IP", "MetaData IP", "VN"]
 
-    #os.popen('curl -s http://' + vrouter_ip + ':8085/Snh_VrouterInfoReq > vrouter_name.xml')
-    os.popen('curl -s http://' + vrouter_ip + ':8085/Snh_ItfReq > ' + vrouter_ip + '.xml')
+    res = requests.get(url=f'http://{vrouter_ip}:8085/Snh_VrouterInfoReq')
+    if res.status_code != 200:
+        print('error: host is not reachable')
+        return
+    root = ET.fromstring(res.text)
+    vrouter_name = root.find('display_name').text
+    compute_name = vrouter_name
 
-    vrouter_tree = ET.parse('vrouter_name.xml')
-    vrouter_root = vrouter_tree.getroot()
-    os.remove('vrouter_name.xml')
-    vrouter_name = vrouter_root.find('display_name').text
-    compute_name = vrouter_name + ' [' + vrouter_ip + ']'
+    res = requests.get(url=f'http://{vrouter_ip}:8085/Snh_ItfReq')
+    if res.status_code != 200:
+        print('error: host is not reachable')
+        return
+    root = ET.fromstring(res.text)
 
-    compute_tree = ET.parse(vrouter_ip + '.xml')
-    compute_root = compute_tree.getroot()
-    os.remove(vrouter_ip + '.xml')
-
-    for interface in compute_root.iter('ItfSandeshData'):
+    for interface in root.iter('ItfSandeshData'):
         vm_name = interface.find('vm_name').text
         ip_addr = interface.find('ip_addr').text
         mdata_ip_addr = interface.find('mdata_ip_addr').text
+        vn = interface.find('vn_name').text
 
         if vm_name is not None:
-            vm_info.add_row([compute_name, vm_name, ip_addr, mdata_ip_addr])
-    return vm_info
+            vm_info.add_row([compute_name, vm_name, ip_addr, mdata_ip_addr, vn.split(':')[-1]])
+    print(vm_info)
 
 def pair_check(sep, value):
     attr = value.split(sep)
