@@ -26,6 +26,7 @@ features = {
     'fw': 'Firewall',
     'qos': 'Qos',
     'sg': 'Security Group',
+    'floatingip': 'Floating IP',
     'provider': 'Public Network Provider',
 }
 
@@ -47,8 +48,12 @@ def main():
     parser.add_argument('--password', help='Password to login host')
     parser.add_argument('--debug', action='store_true', help='Output curl command for each request')
     parser.add_argument('-g', '--gen-auth', action='store_true', help='Generate authenticate file')
+    parser.add_argument('-i', '--interface', metavar='HOST', help='Get vrouter interface in the host')
     def cmd_file(args):
         debug_out('cmd_file: ', args)
+        if args.interface:
+            vr_interface(args.interface)
+            return
         if args.gen_auth:
             auth_host = args.host if args.host else '127.0.0.1'
             password = args.password if args.password else 'ArcherAdmin@123'
@@ -106,6 +111,35 @@ def main():
         debug = True
     debug_out('cmd: ', args)
     args.func(args)
+
+def vr_interface(vrouter_ip):
+    import xml.etree.ElementTree as ET
+    from prettytable import PrettyTable
+
+    vm_info = PrettyTable()
+    vm_info.field_names = ["Compute Node", "VM Name", "VM IP Address", "Link-Local Address"]
+
+    #os.popen('curl -s http://' + vrouter_ip + ':8085/Snh_VrouterInfoReq > vrouter_name.xml')
+    os.popen('curl -s http://' + vrouter_ip + ':8085/Snh_ItfReq > ' + vrouter_ip + '.xml')
+
+    vrouter_tree = ET.parse('vrouter_name.xml')
+    vrouter_root = vrouter_tree.getroot()
+    os.remove('vrouter_name.xml')
+    vrouter_name = vrouter_root.find('display_name').text
+    compute_name = vrouter_name + ' [' + vrouter_ip + ']'
+
+    compute_tree = ET.parse(vrouter_ip + '.xml')
+    compute_root = compute_tree.getroot()
+    os.remove(vrouter_ip + '.xml')
+
+    for interface in compute_root.iter('ItfSandeshData'):
+        vm_name = interface.find('vm_name').text
+        ip_addr = interface.find('ip_addr').text
+        mdata_ip_addr = interface.find('mdata_ip_addr').text
+
+        if vm_name is not None:
+            vm_info.add_row([compute_name, vm_name, ip_addr, mdata_ip_addr])
+    return vm_info
 
 def pair_check(sep, value):
     attr = value.split(sep)
@@ -393,6 +427,33 @@ class parser_port(parser_base):
             self.res.ip = args.ip
         if 'qos' in args:
             self.res.qos = args.qos
+        self.cmd_action()
+
+class parser_floatingip(parser_base):
+    def __init__(self, parser):
+        super().__init__(parser)
+        self.res = FloatingIP()
+        self.create_parser.add_argument('-n', '--net', required=True, help='Network the floating ip allocated from')
+        self.create_parser.add_argument('-s', '--subnet', help='Subnet the floating ip allocated from')
+        self.create_parser.add_argument('--ip', help='Floating ip address should be allocated')
+        self.create_parser.add_argument('--fixed-ip', help='Fixed ip address associated with floating ip')
+        self.create_parser.add_argument('-p', '--port', help='Port associated with floating ip')
+        self.update_parser.add_argument('-p', '--port', nargs='?', help='Port associated with floating ip, remove if no value')
+        parser.set_defaults(func=self.cmd_floatingip)
+
+    def cmd_floatingip(self, args):
+        debug_out('cmd_floatingip: ', args)
+        self.cmd_base(args)
+        if 'net' in args:
+            self.res.net = args.net
+        if 'subnet' in args:
+            self.res.subnet = args.subnet
+        if 'ip' in args:
+            self.res.ip = args.ip
+        if 'fixed_ip' in args:
+            self.res.fixed_ip = args.fixed_ip
+        if 'port' in args:
+            self.res.port = self.name_to_id(Port(), args.port)
         self.cmd_action()
 
 class parser_lb(parser_base):
@@ -1818,6 +1879,40 @@ class Provider(Resource):
     @interfaces.setter
     def interfaces(self, value):
         self.resource['insterfaces'] = value
+
+class FloatingIP(Resource):
+    def __init__(self, res_id=None, name=None):
+        super().__init__('floatingip', res_id=res_id, name=name)
+    @property
+    def net(self):
+        return self.resource.get('floating_network_id')
+    @net.setter
+    def net(self, value):
+        self.resource['floating_network_id'] = value
+    @property
+    def subnet(self):
+        return self.resource.get('subnet_id')
+    @subnet.setter
+    def subnet(self, value):
+        self.resource['subnet_id'] = value
+    @property
+    def ip(self):
+        return self.resource.get('floating_ip_address')
+    @ip.setter
+    def ip(self, value):
+        self.resource['floating_ip_address'] = value
+    @property
+    def port(self):
+        return self.resource.get('port_id')
+    @port.setter
+    def port(self, value):
+        self.resource['port_id'] = value
+    @property
+    def fixed_ip(self):
+        return self.resource.get('fixed_ip_address')
+    @fixed_ip.setter
+    def fixed_ip(self, value):
+        self.resource['fixed_ip_address'] = value
 
 if __name__ == '__main__':
     main()
