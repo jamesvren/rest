@@ -1,6 +1,12 @@
 # Python command line for Rest API
 
-## Use this tool like:
-./rest.py [-h <ip> [-p <password>]] -f sample.json
+## Generate auth.json before use the cli
+./rest.py -g
 
-All setting are in sample.json, you can define your own.
+### modify auth_host in auth.json
+
+## If cli not enougth, you can modify example.json and use it as rest API input
+./rest.py -f example.json
+
+## Please use -h for cli detail.
+Still have bug and please ask me to fix it.
