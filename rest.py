@@ -14,6 +14,8 @@ OPER = {
     'create': 'CREATE',
     'delete': 'DELETE',
     'update': 'UPDATE',
+    'insert': 'INSERT_RULE',
+    'remove': 'REMOVE_RULE',
     }
 
 features = {
@@ -32,13 +34,12 @@ features = {
 
 debug = False
 def DEBUG(*msg):
-    global debug
     if debug:
         print(*msg)
 
 def debug_out(*msg):
-    debug = False
-    if debug:
+    enable = False
+    if enable:
         print(*msg)
 
 def main():
@@ -117,9 +118,9 @@ def vr_interface(vrouter_ip):
     import xml.etree.ElementTree as ET
     from prettytable import PrettyTable
 
-    debug_out('vr_interface: ', vrouter_ip)
+    print('VRouter: ', vrouter_ip)
     vm_info = PrettyTable()
-    vm_info.field_names = ["VRouter", "VM Name", "VM IP", "MetaData IP", "VN"]
+    vm_info.field_names = ["VRouter", "VM Name", "Intf Name", "Intf IP", "MetaData IP", "VN", "FIP"]
 
     res = requests.get(url=f'http://{vrouter_ip}:8085/Snh_VrouterInfoReq')
     if res.status_code != 200:
@@ -136,13 +137,18 @@ def vr_interface(vrouter_ip):
     root = ET.fromstring(res.text)
 
     for interface in root.iter('ItfSandeshData'):
+        intf_name = interface.find('name').text
         vm_name = interface.find('vm_name').text
         ip_addr = interface.find('ip_addr').text
         mdata_ip_addr = interface.find('mdata_ip_addr').text
         vn = interface.find('vn_name').text
+        fip = None
+        fip_e = interface.find('fip_list')
+        for fip_list in fip_e.iter('FloatingIpSandeshList'):
+            fip = fip_list.find('ip_addr').text
 
         if vm_name is not None:
-            vm_info.add_row([compute_name, vm_name, ip_addr, mdata_ip_addr, vn.split(':')[-1]])
+            vm_info.add_row([compute_name, vm_name, intf_name, ip_addr, mdata_ip_addr, vn.split(':')[-1], fip])
     print(vm_info)
 
 def pair_check(sep, value):
@@ -211,7 +217,8 @@ class parser_base():
             self.res.shared = args.shared
         if 'enabled' in args:
             self.res.enabled = args.enabled
-        self.res.oper = OPER[args.oper]
+        if 'oper' in args:
+            self.res.oper = OPER[args.oper]
         if 'name' not in args:
             return
         try:
@@ -231,7 +238,7 @@ class parser_base():
         debug_out('cmd_list: ', args)
         self.res.oper = OPER[args.oper]
         if 'net' in args:
-            net_id = self.name_to_id(VirtualNetwork(), args.net)
+            net_id = [self.name_to_id(VirtualNetwork(), net) for net in args.net]
             self.res.filters['network_id'] = net_id
         if 'prefix' in args:
             self.res.filters['prefix'] = args.prefix
@@ -449,15 +456,18 @@ class parser_floatingip(parser_base):
         debug_out('cmd_floatingip: ', args)
         self.cmd_base(args)
         if 'net' in args:
-            self.res.net = args.net
+            self.res.net = self.name_to_id(VirtualNetwork(), args.net)
         if 'subnet' in args:
-            self.res.subnet = args.subnet
+            self.res.subnet = self.name_to_id(Subnet(), args.subnet)
         if 'ip' in args:
             self.res.ip = args.ip
         if 'fixed_ip' in args:
             self.res.fixed_ip = args.fixed_ip
         if 'port' in args:
-            self.res.port = self.name_to_id(Port(), args.port)
+            if args.port:
+                self.res.port = self.name_to_id(Port(), args.port)
+            else:
+                self.res.port = None
         self.cmd_action()
 
 class parser_lb(parser_base):
@@ -503,7 +513,7 @@ class parser_loadbalancer(parser_base):
         parser.set_defaults(func=self.cmd_loadbalancer)
 
     def cmd_loadbalancer(self, args):
-        debug_out('cmd_router: ', args)
+        debug_out('cmd_loadbalancer: ', args)
         self.cmd_base(args)
         if 'subnet' in args:
             self.res.subnet = self.name_to_id(Subnet(), args.subnet)
@@ -514,9 +524,9 @@ class parser_loadbalancer(parser_base):
         if 'cluster' in args:
             self.res.cluster = args.cluster
         if 'listerners' in args:
-            self.res.listeners = args.listeners
+            self.res.listeners = [self.name_to_id(LoadBalanceListener(), l) for l in args.listeners]
         if 'pools' in args:
-            self.res.pools = args.pools
+            self.res.pools = [self.name_to_id(LoadBalancePool(), p) for p in args.pools]
         self.cmd_action()
 
 class parser_listener(parser_base):
@@ -596,6 +606,9 @@ class parser_member(parser_base):
         if 'subnet' in args:
             self.res.subnet= self.name_to_id(Subnet(), args.subnet)
         self.cmd_action()
+    def cmd_list(self, args):
+        self.res.pool = self.name_to_id(LoadBalancePool(), args.pool)
+        super().cmd_list(args)
 
 class parser_lbmonitor(parser_base):
     def __init__(self, parser):
@@ -610,7 +623,7 @@ class parser_lbmonitor(parser_base):
         parser.set_defaults(func=self.cmd_lbmonitor)
 
     def cmd_lbmonitor(self, args):
-        debug_out('cmd_member: ', args)
+        debug_out('cmd_lbmonitor: ', args)
         self.cmd_base(args)
         self.res.pool = args.pool
         if 'protocol' in args:
@@ -766,7 +779,7 @@ class parser_fw(parser_base):
         policy = subparser.add_parser('policy', help='Firewall policy')
         parser_policy(policy)
         rule = subparser.add_parser('rule', help='Policy rule')
-        parser_rule(rule)
+        parser_fwrule(rule)
         parser.set_defaults(func=self.cmd_fw)
 
     def cmd_fw(self, args):
@@ -792,33 +805,46 @@ class parser_firewall(parser_base):
         debug_out('cmd_firewall: ', args)
         self.cmd_base(args)
         if 'policy' in args:
-            self.res.policys = self.name_to_id(FwPolicy(), args.policy)
+            self.res.policys = [self.name_to_id(FwPolicy(), p) for p in args.policy]
         if 'project' in args:
             self.res.projects = args.project
         if 'network' in args:
-            self.res.networks = self.name_to_id(VirtualNetwork(), args.network)
+            self.res.networks = [self.name_to_id(VirtualNetwork(), n) for n in args.network]
         if 'port' in args:
-            self.res.ports = self.name_to_id(Port(), args.port)
+            self.res.ports = [self.name_to_id(Port(), p) for p in args.port]
         self.cmd_action()
 
 class parser_policy(parser_base):
     def __init__(self, parser):
         super().__init__(parser)
         self.res = FwPolicy()
-        self.create_parser.add_argument('-r', '--rule', nargs='+', help='Rule to be associated')
+        self.create_parser.add_argument('-r', '--rules', nargs='+', help='Rule to be associated')
         self.create_parser.add_argument('--audited', type=bool)
+        self.insert_parser = self.operparser.add_parser('insert', argument_default=argparse.SUPPRESS, help='insert a rule')
+        self.insert_parser.add_argument('--oper', default='insert', help=argparse.SUPPRESS)
+        self.insert_parser.add_argument('-r', '--rule')
+        self.insert_parser.add_argument('name', metavar='NAME', help='Name or ID to be updated')
+        self.insert_parser.add_argument('-b', '--before', metavar='RULE', help='Insert before this rule')
+        self.remove_parser = self.operparser.add_parser('remove', argument_default=argparse.SUPPRESS, help='remove a rule')
+        self.remove_parser.add_argument('--oper', default='remove', help=argparse.SUPPRESS)
+        self.remove_parser.add_argument('name', metavar='NAME', help='Name or ID to be updated')
+        self.remove_parser.add_argument('-r', '--rule', metavar='RULE', help='Remove this rule')
         parser.set_defaults(func=self.cmd_policy)
 
     def cmd_policy(self, args):
         debug_out('cmd_policy: ', args)
         self.cmd_base(args)
-        if 'rule' in args:
-            self.res.rules = self.name_to_id(FwRule(), args.rule)
+        if 'rules' in args:
+            self.res.rules = [self.name_to_id(FwRule(), r) for r in args.rules]
         if 'audited' in args:
             self.res.audited = args.audited
+        if 'rule' in args:
+            self.res.rule = self.name_to_id(FwRule(), args.rule)
+        if 'before' in args:
+            self.res.insert_before = self.name_to_id(FwRule(), args.before)
         self.cmd_action()
 
-class parser_rule(parser_base):
+class parser_fwrule(parser_base):
     def __init__(self, parser):
         super().__init__(parser)
         self.res = FwRule()
@@ -900,14 +926,53 @@ class parser_ipgroup(parser_base):
     def cmd_ipgroup(self, args):
         debug_out('cmd_ipgroup: ', args)
         self.cmd_base(args)
-        if 'direction' in args:
-            self.res.direction = args.direction
-        if 'rate' in args:
-            self.res.rate = self.name_to_id(Qos(), args.rate)
+        if 'net' in args:
+            self.res.net = self.name_to_id(args.net)
+        if 'ip' in args:
+            self.res.ip = args.ip
+        if 'protocol' in args:
+            self.res.protocol = args.protocol
+        if 'port' in args:
+            self.res.port = [self.name_to_id(Port(), p) for p in args.port]
+        if 'ratelimit' in args:
+            self.res.ratelimit = args.ratelimit
         self.cmd_action()
 
 class parser_sg(parser_base):
-    pass
+    def __init__(self, parser):
+        self.parser = parser
+        subparser = self.parser.add_subparsers()
+        group = subparser.add_parser('group', help='Security group')
+        parser_group(group)
+        rule = subparser.add_parser('rule', help='Security group rule')
+        parser_sgrule(rule)
+        parser.set_defaults(func=self.cmd_sg)
+
+    def cmd_sg(self, args):
+        self.parser.print_usage()
+
+class parser_group(parser_base):
+    def __init__(self, parser):
+        super().__init__(parser)
+        self.res = SecurityGroup()
+        parser.set_defaults(func=self.cmd_group)
+
+    def cmd_group(self, args):
+        debug_out('cmd_group: ', args)
+        self.cmd_base(args)
+        self.cmd_action()
+
+class parser_sgrule(parser_base):
+    def __init__(self, parser):
+        super().__init__(parser)
+        self.res = SecurityGroupRule()
+        parser.set_defaults(func=self.cmd_rule)
+
+    def cmd_rule(self, args):
+        debug_out('cmd_rule: ', args)
+        self.cmd_base(args)
+        self.cmd_action()
+
 class parser_provider(parser_base):
     def __init__(self, parser):
         super().__init__(parser)
@@ -944,7 +1009,8 @@ class ResourceAction():
 
         resources = self.api.req('post', self.url, self.res.body)
         for res in resources:
-            if res['name'] == name:
+            res_name = res.get('name')
+            if res_name == name:
                 res_id.append((res['id'], res.get('fq_name', name)))
 
         idx = 0
@@ -957,7 +1023,7 @@ class ResourceAction():
             if idx >= len(res_id):
                 raise Exception('Your input not in scope')
         if not res_id:
-            raise Exception('Error: %s %s Not Found' % (self.res.type, self.res.name))
+            raise Exception('Error: %s %s Not Found' % (self.res.type, name))
         self.res.oper = oper
         return res_id[idx][0]
 
@@ -1625,14 +1691,20 @@ class Firewall(Resource):
     def projects(self):
         return self.resource.get('projects')
     @projects.setter
-    def projects(self):
+    def projects(self, value):
         self.resource['projects'] = value
     @property
     def ports(self):
         return self.resource.get('ports')
     @ports.setter
-    def projects(self):
+    def ports(self, value):
         self.resource['ports'] = value
+    @property
+    def networks(self):
+        return self.resource.get('networks')
+    @networks.setter
+    def networks(self, value):
+        self.resource['networks'] = value
 
 class FwPolicy(Resource):
     def __init__(self, res_id=None, name=None):
@@ -1647,8 +1719,20 @@ class FwPolicy(Resource):
     def audited(self):
         return self.resource.get('audited')
     @audited.setter
-    def audited(self):
+    def audited(self, value):
         self.resource['audited'] = value
+    @property
+    def rule(self):
+        return self.resource.get('firewall_rule_id')
+    @rule.setter
+    def rule(self, value):
+        self.resource['firewall_rule_id'] = value
+    @property
+    def insert_before(self):
+        return self.resource.get('insert_before')
+    @insert_before.setter
+    def insert_before(self, value):
+        self.resource['insert_before'] = value
 
 class FwRule(Resource):
     def __init__(self, res_id=None, name=None):
@@ -1917,6 +2001,26 @@ class FloatingIP(Resource):
     @fixed_ip.setter
     def fixed_ip(self, value):
         self.resource['fixed_ip_address'] = value
+
+class SecurityGroup(Resource):
+    def __init__(self, res_id=None, name=None):
+        super().__init__('security_group', res_id=res_id, name=name)
+    @property
+    def rules(self):
+        return self.resource.get('security_group_rules')
+    @rules.setter
+    def rules(self, value):
+        self.resource['security_group_rules'] = value
+
+class SecurityGroupRule(Resource):
+    def __init__(self, res_id=None, name=None):
+        super().__init__('security_group_rule', res_id=res_id, name=name)
+    @property
+    def group(self):
+        return self.resource.get('security_group_id')
+    @group.setter
+    def group(self, value):
+        self.resource['security_group_id'] = value
 
 if __name__ == '__main__':
     main()
