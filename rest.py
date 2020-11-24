@@ -30,6 +30,7 @@ features = {
     'sg': 'Security Group',
     'floatingip': 'Floating IP',
     'provider': 'Public Network Provider',
+    'nodes': 'SDN Nodes',
 }
 
 debug = False
@@ -97,8 +98,8 @@ def main():
         token = None
         config = pasrse_config_file(args.file)
         api = RestAPI(config['auth_host'], config['auth_port'], config['version'], config['user'], config['password'], config['project'])
-        url = api.encode_url(config['host'], config['port'], config['api'])
-        result = api.req(config['method'], url, config['body'])
+        url = api.encode_url(host=config['host'], port=config['port'], uri=config['api'])
+        _, result = api.req(config['method'], url, config['body'])
         print(json.dumps(result, indent=4))
 
     parser.set_defaults(func=cmd_file)
@@ -163,8 +164,8 @@ def pair_check(sep, value):
 def kv(value):
     return pair_check('=', value)
 
-def pool(value):
-    return pair_check('-', value)
+def RANGE(value):
+    return pair_check(':', value)
 
 def BOOL(value):
     if value.lower() in ['true', 'yes']:
@@ -211,7 +212,6 @@ class parser_base():
         self.list_parser.add_argument('--name', nargs='+', help='Filter by name')
         self.list_parser.set_defaults(func=self.cmd_list)
 
-
     def cmd_base(self, args):
         if 'shared' in args:
             self.res.shared = args.shared
@@ -253,7 +253,6 @@ class parser_base():
         if 'device' in args:
             self.res.filters['device_id'] = args.device
         self.cmd_action()
-
 
     def cmd_action(self, res=None):
         action_res = self.res if not res else res
@@ -302,7 +301,7 @@ class parser_subnet(parser_base):
         self.create_parser.add_argument('-p', '--prefix', required=True, help='Prefix of a ubnet')
         self.create_parser.add_argument('--no-dhcp', action='store_true', help='Disable DHCP')
         self.create_parser.add_argument('--no-gateway', action='store_true', help='Disable gateway')
-        self.create_parser.add_argument('--pools', type=pool, metavar='START-END', nargs='+',
+        self.create_parser.add_argument('--pools', type=RANGE, metavar='START:END', nargs='+',
                                         help='Allocation pools')
 
         self.list_parser.add_argument('--net', nargs='+', help='Filter by network')
@@ -537,7 +536,6 @@ class parser_listener(parser_base):
         self.create_parser.add_argument('--port', required=True, help='Protocol port to listen')
         self.create_parser.add_argument('-p', '--protocol', required=True, help='Protocol to listen',
                                         choices=['tcp', 'http', 'https', 'terminated_https'])
-
         parser.set_defaults(func=self.cmd_listener)
 
     def cmd_listener(self, args):
@@ -955,34 +953,145 @@ class parser_group(parser_base):
     def __init__(self, parser):
         super().__init__(parser)
         self.res = SecurityGroup()
+        self.create_parser.add_argument('-d', '--direction', choices=['ingress', 'egress'])
+        self.create_parser.add_argument('-a', '--action', choices=['accept', 'deny'], nargs='+', help='IP addresses to be ratelimited')
+        self.create_parser.add_argument('-p', '--protocol')
+        self.create_parser.add_argument('--port', type=RANGE, metavar='MIN:MAX', help='TCP/UDP port')
+        self.create_parser.add_argument('--priority', help='Priority of this rule')
+        self.create_parser.add_argument('-v', '--ethertype', choices=['IPv4', 'IPv6'], help='Priority of this rule')
+
         parser.set_defaults(func=self.cmd_group)
 
     def cmd_group(self, args):
         debug_out('cmd_group: ', args)
         self.cmd_base(args)
+        rule = {}
+        if 'direction' in args:
+            rule['direction'] = args.direction
+        if 'action' in args:
+            rule['action'] = args.action
+        if 'protocol' in args:
+            rule['protocol'] = args.protocol
+        if 'port' in args:
+            rule['port'] = args.port
+        if 'priority' in args:
+            rule['priority'] = args.priority
+        if 'ethertype' in args:
+            rule['ethertype'] = args.ethertype
+        if rule:
+            self.res.rules = [rule]
         self.cmd_action()
 
 class parser_sgrule(parser_base):
     def __init__(self, parser):
         super().__init__(parser)
         self.res = SecurityGroupRule()
+        self.create_parser.add_argument('-d', '--direction', choices=['ingress', 'egress'])
+        self.create_parser.add_argument('-a', '--action', choices=['accept', 'deny'], nargs='+', help='IP addresses to be ratelimited')
+        self.create_parser.add_argument('-p', '--protocol')
+        self.create_parser.add_argument('--port', type=RANGE, metavar='MIN:MAX', help='TCP/UDP port')
+        self.create_parser.add_argument('--priority', help='Priority of this rule')
+        self.create_parser.add_argument('-v', '--ethertype', choices=['IPv4', 'IPv6'])
+        self.create_parser.add_argument('--enable', type=BOOL)
+        self.create_parser.add_argument('group', help='Security group associated with')
+
+        self.update_parser.add_argument('-d', '--direction', choices=['ingress', 'egress'])
+        self.update_parser.add_argument('-a', '--action', choices=['accept', 'deny'], nargs='+', help='IP addresses to be ratelimited')
+        self.update_parser.add_argument('-p', '--protocol')
+        self.update_parser.add_argument('--port', type=RANGE, metavar='MIN:MAX', help='TCP/UDP port')
+        self.update_parser.add_argument('--priority', help='Priority of this rule')
+        self.update_parser.add_argument('-v', '--ethertype', choices=['IPv4', 'IPv6'])
+        self.update_parser.add_argument('--enable', type=BOOL)
         parser.set_defaults(func=self.cmd_rule)
 
     def cmd_rule(self, args):
         debug_out('cmd_rule: ', args)
         self.cmd_base(args)
+        if 'direction' in args:
+            self.res.resource['direction'] = args.direction
+        if 'action' in args:
+            self.res.resource['action'] = args.action
+        if 'protocol' in args:
+            self.res.resource['protocol'] = args.protocol
+        if 'port' in args:
+            self.res.resource['port'] = args.port
+        if 'priority' in args:
+            self.res.resource['priority'] = args.priority
+        if 'ethertype' in args:
+            self.res.resource['ethertype'] = args.ethertype
+        if 'enable' in args:
+            self.res.resource['enabled'] = args.enable
         self.cmd_action()
 
 class parser_provider(parser_base):
     def __init__(self, parser):
         super().__init__(parser)
         self.res = Provider()
+        self.create_parser.add_argument('-i', '--interfaces', type=kv, metavar='HOST=NIC', nargs='+', help='Interface for public network')
+        self.update_parser.add_argument('-i', '--interfaces', type=kv, metavar='HOST=NIC', nargs='+', help='Interface for public network')
         parser.set_defaults(func=self.cmd_provider)
 
     def cmd_provider(self, args):
         debug_out('cmd_provider: ', args)
         self.cmd_base(args)
+        if 'interfaces' in args:
+            interfaces = []
+            for intf in args.interfaces:
+                i = intf.split('=')
+                interfaces.append({'host': i[0], 'nic': i[1]})
+            self.res.interfaces = args.interfaces
         self.cmd_action()
+
+class parser_nodes():
+    def __init__(self, parser):
+        self.res = ResBase()
+        self.action = None
+
+        self.parser = parser
+        self.parser.add_argument('--type', required=True,
+                                 choices=['vrouter', 'control', 'config', 'configdb', 'analytics', 'analyticsdb'],
+                                 help='Staled node type')
+        self.operparser = parser.add_subparsers()
+        self.list_parser = self.operparser.add_parser('list')
+        self.list_parser.set_defaults(func=self.cmd_list)
+
+        self.delete_parser = self.operparser.add_parser('delete')
+        self.delete_parser.add_argument('--hostname', required=True, help='Hostame of staled vrouter')
+        #self.delete_parser.add_argument('--ip', required=True, help='IP of staled vrouter')
+        self.delete_parser.set_defaults(func=self.cmd_delete)
+
+    def cmd_list(self, args):
+        debug_out('cmd_list: ', args)
+        nodes_map = {'vrouter': 'virtual-routers', 'control': 'bgp-routers', 'config': 'config-nodes',
+                     'configdb': 'config-database-nodes', 'analytics': 'analytics-nodes', 'analyticsdb': 'database-nodes'}
+        self.res.url = '/' + nodes_map[args.type]
+        self.action = ResourceAction(self.res)
+        self.action.get()
+
+    def cmd_delete(self, args):
+        nodes_map = {'vrouter': 'virtual-router', 'control': 'bgp-router', 'config': 'config-node',
+                     'configdb': 'config-database-node', 'analytics': 'analytics-node', 'analyticsdb': 'database-node'}
+        default_fq = ['default-global-system-config', args.hostname]
+        nodes_fqname = {'vrouter': default_fq, 'config': default_fq, 'configdb': default_fq, 'analytics': default_fq, 'analyticsdb': default_fq,
+                        'control': ['default-domain', 'default-project', 'ip-fabric', '__default__', args.hostname]}
+        debug_out('cmd_vrouter: ', args)
+        self.action = ResourceAction(self.res)
+        res_id = self.action.fqname_to_id(nodes_map[args.type], nodes_fqname[args.type])
+        if not res_id:
+            print(f'error: node {args.hostname} not found')
+            return
+        # delete node
+        if args.type == 'vrouter':
+            # delete vmi for vrouter
+            vmi = default_fq + ['vhost0']
+            vmi_id = self.action.fqname_to_id('virtual-machine-interface', vmi)
+            if vmi_id:
+                self.res.url = f"/virtual-machine-interface/{vmi_id['uuid']}"
+                self.action.set_res(self.res)
+                self.action.delete()
+        self.res.url = f"/{nodes_map[args.type]}/{res_id['uuid']}"
+        self.action.set_res(self.res)
+        self.action.delete()
 
 class ResourceAction():
     def __init__(self, res_obj):
@@ -995,11 +1104,11 @@ class ResourceAction():
         self.host = config['host']
         self.port = config['port']
         self.api = RestAPI(config['auth_host'], config['auth_port'], config['version'], config['user'], config['password'], config['project'])
-        self.url = self.api.encode_url(self.host, self.port, res_obj.url)
+        self.url = self.api.encode_url(host=self.host, port=self.port, uri=res_obj.url)
 
     def set_res(self, res_obj):
         self.res = res_obj
-        self.url = self.api.encode_url(self.host, self.port, res_obj.url)
+        self.url = self.api.encode_url(uri=res_obj.url)
 
     def name_to_id(self, name):
         self.res.filters = { 'name' : name}
@@ -1007,7 +1116,9 @@ class ResourceAction():
         self.res.oper = 'READALL'
         res_id = []
 
-        resources = self.api.req('post', self.url, self.res.body)
+        code, resources = self.api.req('post', self.url, self.res.body)
+        if code != 200:
+            raise Exception('Not able to get resource')
         for res in resources:
             res_name = res.get('name')
             if res_name == name:
@@ -1027,6 +1138,15 @@ class ResourceAction():
         self.res.oper = oper
         return res_id[idx][0]
 
+    def fqname_to_id(self, res_type, fqname):
+        json_body = {'type': res_type, 'fq_name': fqname}
+        self.url = self.api.encode_url('/fqname-to-id')
+        code, ret = self.api.req('post', self.url, json_body)
+        if code != 200:
+            print(ret)
+            return None
+        return ret
+
     def post(self):
         if not self.res.id and self.res.oper != 'CREATE' and self.res.oper != 'READALL':
             try:
@@ -1035,16 +1155,36 @@ class ResourceAction():
                 print(str(e))
                 return
 
-        result = self.api.req('post', self.url, self.res.body)
+        code, result = self.api.req('post', self.url, self.res.body)
+        if code != 200:
+            print(result)
+            return
         table = Table(4)
         table.from_json(result)
         print(table)
 
     def put(self):
-        result = self.api.req('put', self.url, self.res.body)
+        code, result = self.api.req('put', self.url, self.res.body)
+        if code != 200:
+            print(result)
+            return
         table = Table(4)
         table.from_json(result)
         print(table)
+
+    def get(self):
+        code, result = self.api.req('get', self.url, self.res.body)
+        if code != 200:
+            print(result)
+            return
+        table = Table(4)
+        table.from_json(result)
+        print(table)
+
+    def delete(self):
+        code, result = self.api.req('delete', self.url, self.res.body)
+        if code != 200:
+            print(result)
 
 # Rest API tools for all kinds of resources
 class RestAPI():
@@ -1059,11 +1199,12 @@ class RestAPI():
         self.domain = domain
         self.headers = {'Content-Type': 'application/json'}
         self.token = ''
+        self.host = None
+        self.port = None
 
     def get_token(self):
         if self.version == 'v3':
             auth_url = 'http://%s:%s/v3/auth/tokens' % (self.auth_host, self.auth_port)
-            #body = {'username': self.user, 'project_name': self.project, 'auth_url': 'http://10.131.17.45:45357/v3', 'user_domain_name': 'Default', 'password': '***', 'project_domain_name': 'Default'}
             body = { 'auth': {
                        'identity': {
                           'methods': ["password"],
@@ -1102,7 +1243,11 @@ class RestAPI():
         for (key,value) in self.headers.items():
             header_str += '-H "%s:%s" ' % (key, value)
         DEBUG("curl -X POST %s %s-d '%s'" % (auth_url, header_str, json.dumps(body)))
-        res = requests.post(auth_url, data=json.dumps(body), headers=self.headers)
+        try:
+            res = requests.post(auth_url, data=json.dumps(body), headers=self.headers)
+        except Exception as e:
+            print(str(e))
+            return None
         if res.status_code == 401:
             return None
         if (self.version == 'v2'):
@@ -1138,19 +1283,34 @@ class RestAPI():
         else:
             DEBUG("\ncurl -X %s %s %s-d '%s' | python -m json.tool\n" % (method.upper(), url, header_str, data))
 
-        res = oper[method](url, data=data, headers=self.headers)
+        try:
+            res = oper[method](url, data=data, headers=self.headers)
+        except Exception as e:
+            return 500, str(e)
         DEBUG(res.status_code)
         if res.text:
-            DEBUG(res.json())
-            return res.json()
+            try:
+                DEBUG(res.json())
+                return res.status_code, res.json()
+            except:
+                DEBUG(res.text)
+                return res.status_code, res.text
         else:
-            return []
+            return res.status_code, []
 
-    def encode_url(self, host, port, api_uri, api_version=None):
-        if (api_version is None):
-            return 'http://%s:%s%s' % (host, port, api_uri)
+    def encode_url(self, uri, host=None, port=None, api_version=None):
+        if not host:
+            host = self.host
         else:
-            return 'http://%s:%s/%s%s' % (host, port, api_version, api_uri)
+            self.host = host
+        if not port:
+            port = self.port
+        else:
+            self.port = port
+        if (api_version is None):
+            return 'http://%s:%s%s' % (host, port, uri)
+        else:
+            return 'http://%s:%s/%s%s' % (host, port, api_version, uri)
 
 class Table():
     def __init__(self, indent=0):
@@ -1264,6 +1424,11 @@ def pasrse_config_file(config_file=None):
         auth['api'] = api
         auth['body'] = body
         return auth
+
+class ResBase():
+    def __init__(self):
+        self.url = None
+        self.body = {}
 
 class Resource():
     def __init__(self, res_type, res_id=None, name=None):
@@ -1391,21 +1556,18 @@ class Subnet(Resource):
     @cidr.setter
     def cidr(self, value):
         self.resource['cidr'] = value
-
     @property
     def dhcp(self):
         return self.resource.get('enable_dhcp')
     @dhcp.setter
     def dhcp(self, value):
         self.resource['enable_dhcp'] = value
-
     @property
     def gateway(self):
         return self.resource.get('gateway_ip')
     @gateway.setter
     def gateway(self, value):
         self.resource['gateway_ip'] = value
-
     def add_alloc_pool(start, end):
         pool = self.resource.get('allocation_pools')
         if pool:
