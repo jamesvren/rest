@@ -98,6 +98,8 @@ def main():
         token = None
         config = pasrse_config_file(args.file)
         api = RestAPI(config['auth_host'], config['auth_port'], config['version'], config['user'], config['password'], config['project'])
+        if 'header' in config:
+            api.add_header(config['header'])
         url = api.encode_url(host=config['host'], port=config['port'], uri=config['api'])
         _, result = api.req(config['method'], url, config['body'])
         print(json.dumps(result, indent=4))
@@ -1202,6 +1204,9 @@ class RestAPI():
         self.host = None
         self.port = None
 
+    def add_header(self, header):
+        self.headers.update(header)
+
     def get_token(self):
         if self.version == 'v3':
             auth_url = 'http://%s:%s/v3/auth/tokens' % (self.auth_host, self.auth_port)
@@ -1239,12 +1244,11 @@ class RestAPI():
                     }
                 }
             }
-        header_str = ''
-        for (key,value) in self.headers.items():
-            header_str += '-H "%s:%s" ' % (key, value)
+        header = {'Content-Type': 'application/json'}
+        header_str = '-H "Content-Type:application/json" '
         DEBUG("curl -X POST %s %s-d '%s'" % (auth_url, header_str, json.dumps(body)))
         try:
-            res = requests.post(auth_url, data=json.dumps(body), headers=self.headers)
+            res = requests.post(auth_url, data=json.dumps(body), headers=header)
         except Exception as e:
             print(str(e))
             return None
@@ -1419,6 +1423,13 @@ def pasrse_config_file(config_file=None):
                 api = config['api']
             if 'body' in config:
                 body = config['body']
+            if 'header' in config:
+                auth['header'] = {}
+                headers = config['header'].split(';')
+                for header in headers:
+                    head = header.split(':')
+                    if len(head) > 1:
+                        auth['header'][head[0]] = head[1]
         auth['port'] = port
         auth['method'] = method
         auth['api'] = api
