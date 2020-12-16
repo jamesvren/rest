@@ -51,11 +51,12 @@ def main():
     parser.add_argument('--debug', action='store_true', help='Output curl command for each request')
     parser.add_argument('-g', '--gen-auth', action='store_true', help='Generate authenticate file')
     parser.add_argument('-i', '--interface', metavar='HOST', nargs='+', help='Get vrouter interface in the host')
+    parser.add_argument('--netns', action='store_true', help='Show namespace VM')
     def cmd_file(args):
         debug_out('cmd_file: ', args)
         if args.interface:
             for ip in args.interface:
-                vr_interface(ip)
+                vr_interface(ip, args.netns)
             return
         if args.gen_auth:
             auth_host = args.host if args.host else '127.0.0.1'
@@ -117,7 +118,7 @@ def main():
     debug_out('cmd: ', args)
     args.func(args)
 
-def vr_interface(vrouter_ip):
+def vr_interface(vrouter_ip, show_ns=False):
     import xml.etree.ElementTree as ET
     from prettytable import PrettyTable
 
@@ -137,11 +138,14 @@ def vr_interface(vrouter_ip):
     if res.status_code != 200:
         print('error: host is not reachable')
         return
+    res.encoding='utf8'
     root = ET.fromstring(res.text)
 
     for interface in root.iter('ItfSandeshData'):
         intf_name = interface.find('name').text
         vm_name = interface.find('vm_name').text
+        if not show_ns and (vm_name is None or vm_name.startswith('NetNS-')):
+            continue
         ip_addr = interface.find('ip_addr').text
         mdata_ip_addr = interface.find('mdata_ip_addr').text
         vn = interface.find('vn_name').text
