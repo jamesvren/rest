@@ -7,6 +7,7 @@ import os
 import re
 import requests
 import argparse
+import time
 
 OPER = {
     'show': 'READ',
@@ -43,6 +44,11 @@ def debug_out(*msg):
     if enable:
         print(*msg)
 
+disable_out = False
+def out(*msg):
+    if not disable_out:
+        print(*msg)
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-f', '--file', help='Read from Json file')
@@ -52,6 +58,7 @@ def main():
     parser.add_argument('-g', '--gen-auth', action='store_true', help='Generate authenticate file')
     parser.add_argument('-i', '--interface', metavar='HOST', nargs='+', help='Get vrouter interface in the host')
     parser.add_argument('--netns', action='store_true', help='Show namespace VM')
+    parser.add_argument('--no-output', action='store_true', help='Don not print result')
     def cmd_file(args):
         debug_out('cmd_file: ', args)
         if args.interface:
@@ -103,7 +110,10 @@ def main():
             api.add_header(config['header'])
         url = api.encode_url(host=config['host'], port=config['port'], uri=config['api'])
         _, result = api.req(config['method'], url, config['body'])
-        print(json.dumps(result, indent=4))
+        if args.no_output:
+            global disable_out
+            disable_out = True
+        out(json.dumps(result, indent=4))
 
     parser.set_defaults(func=cmd_file)
     subparsers = parser.add_subparsers()
@@ -1291,14 +1301,15 @@ class RestAPI():
         else:
             DEBUG("\ncurl -X %s %s %s-d '%s' | python -m json.tool\n" % (method.upper(), url, header_str, data))
 
+        tm = time.time()
         try:
             res = oper[method](url, data=data, headers=self.headers)
         except Exception as e:
             return 500, str(e)
-        DEBUG(res.status_code)
+        DEBUG(res.status_code, 'length:', len(res.content), 'time:', time.time()-tm)
         if res.text:
             try:
-                DEBUG(res.json())
+                #DEBUG(res.json())
                 return res.status_code, res.json()
             except:
                 DEBUG(res.text)
