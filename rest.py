@@ -23,6 +23,7 @@ features = {
     'net': 'Virtual Network',
     'subnet': 'Subnet',
     'router': 'Logical Router',
+    'prouter': 'Physical Router',
     'port': 'Virtual Machine Interface',
     'lb': 'Loadbalancer',
     'vpn': 'IpSec VPN',
@@ -1108,6 +1109,32 @@ class parser_nodes():
         self.res.url = f"/{nodes_map[args.type]}/{res_id['uuid']}"
         self.action.set_res(self.res)
         self.action.delete()
+
+class parser_prouter(parser_base):
+    def __init__(self, parser):
+        super().__init__(parser)
+        self.res = PhysicalRouter()
+        self.create_parser.add_argument('-m', '--mgmt-ip', help='Management IP of switch')
+        self.create_parser.add_argument('-c', '--community', help='Community for snmp read')
+        self.create_parser.add_argument('--type', choices=['embedded', 'tor-agent', 'tor-service-node'], help='Physical router type')
+        self.create_parser.add_argument('--check', type=BOOL, help='Physical router connection check')
+        self.update_parser.add_argument('-c', '--community', help='Community for snmp read')
+        self.update_parser.add_argument('--router-type', choices=['embedded', 'tor-agent', 'tor-service-node'], help='Physical router type')
+        self.update_parser.add_argument('--check', type=BOOL, help='Physical router connection check')
+        parser.set_defaults(func=self.cmd_prouter)
+
+    def cmd_prouter(self, args):
+        debug_out('cmd_provider: ', args)
+        self.cmd_base(args)
+        if 'mgmt_ip' in args:
+            self.res.mgmt_ip = args.mgmt_ip
+        if 'community' in args:
+            self.res.snmp = {'v2_community': args.community}
+        if 'router_type' in args:
+            self.res.router_type = args.router_type
+        if 'check' in args:
+            self.res.check = args.check
+        self.cmd_action()
 
 class ResourceAction():
     def __init__(self, res_obj):
@@ -2209,6 +2236,34 @@ class SecurityGroupRule(Resource):
     @group.setter
     def group(self, value):
         self.resource['security_group_id'] = value
+
+class PhysicalRouter(Resource):
+    def __init__(self, res_id=None, name=None):
+        super().__init__('physical_router', res_id=res_id, name=name)
+    @property
+    def mgmt_ip(self):
+        return self.resource.get('management_ip')
+    @mgmt_ip.setter
+    def mgmt_ip(self, value):
+        self.resource['management_ip'] = value
+    @property
+    def snmp(self):
+        return self.resource.get('snmp_credentials')
+    @snmp.setter
+    def snmp(self, value):
+        self.resource['snmp_credentials'] = value
+    @property
+    def router_type(self):
+        return self.resource.get('virtual_router_type')
+    @router_type.setter
+    def router_type(self, value):
+        self.resource['virtual_router_type'] = value
+    @property
+    def connect_check(self):
+        return self.resource.get('virtual_router_type')
+    @connect_check.setter
+    def connect_check(self, value):
+        self.resource['virtual_router_type'] = value
 
 if __name__ == '__main__':
     main()
