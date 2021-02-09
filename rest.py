@@ -33,6 +33,10 @@ features = {
     'floatingip': 'Floating IP',
     'provider': 'Public Network Provider',
     'nodes': 'SDN Nodes',
+    'tag': 'Tag',
+    'address-group': 'Address Group',
+    'service-group': 'Service Group',
+    'seg-fw': 'Segment Firewall',
 }
 
 debug = False
@@ -120,8 +124,9 @@ def main():
     subparsers = parser.add_subparsers()
     for feature in sorted(features.keys()):
         p = subparsers.add_parser(feature, argument_default=argparse.SUPPRESS, help=features[feature])
-        if 'parser_%s' % (feature) in globals():
-            globals()['parser_%s' % (feature)](p)
+        ft = feature.replace('-', '_')
+        if 'parser_%s' % (ft) in globals():
+            globals()['parser_%s' % (ft)](p)
     args = parser.parse_args()
     if args.debug:
         global debug
@@ -160,13 +165,15 @@ def vr_interface(vrouter_ip, show_ns=False):
         ip_addr = interface.find('ip_addr').text
         mdata_ip_addr = interface.find('mdata_ip_addr').text
         vn = interface.find('vn_name').text
+        if vn:
+            vn = vn.split(':')[-1]
         fip = None
         fip_e = interface.find('fip_list')
         for fip_list in fip_e.iter('FloatingIpSandeshList'):
             fip = fip_list.find('ip_addr').text
 
         if vm_name is not None:
-            vm_info.add_row([compute_name, vm_name, intf_name, ip_addr, mdata_ip_addr, vn.split(':')[-1], fip])
+            vm_info.add_row([compute_name, vm_name, intf_name, ip_addr, mdata_ip_addr, vn, fip])
     print(vm_info)
 
 def pair_check(sep, value):
@@ -227,6 +234,7 @@ class parser_base():
         self.list_parser.add_argument('--oper', default='list', help=argparse.SUPPRESS)
         self.list_parser.add_argument('--id', nargs='+', help='Filter by device id')
         self.list_parser.add_argument('--name', nargs='+', help='Filter by name')
+        self.list_parser.add_argument('--filters', type=json.loads)
         self.list_parser.set_defaults(func=self.cmd_list)
 
     def cmd_base(self, args):
@@ -269,6 +277,8 @@ class parser_base():
             self.res.filters['status'] = args.status
         if 'device' in args:
             self.res.filters['device_id'] = args.device
+        if 'filters' in args:
+            self.res.filters = args.filters
         self.cmd_action()
 
     def cmd_action(self, res=None):
@@ -297,6 +307,7 @@ class parser_net(parser_base):
         group = self.create_parser.add_mutually_exclusive_group()
         group.add_argument('--vlan', default=argparse.SUPPRESS, help='VLAN ID for public network')
         group.add_argument('--vxlan', default=argparse.SUPPRESS, help='VXLAN ID for private network')
+        self.create_parser.add_argument('--tag', nargs='*', help='Tag')
         parser.set_defaults(func=self.cmd_net)
 
     def cmd_net(self, args):
@@ -308,6 +319,8 @@ class parser_net(parser_base):
         if 'vxlan' in args:
             self.res.external = False
             self.res.segment = args.vxlan
+        if 'tag' in args:
+            self.res.resource['tag'] = args.tag
         self.cmd_action()
 
 class parser_subnet(parser_base):
@@ -432,8 +445,10 @@ class parser_port(parser_base):
         self.create_parser.add_argument('-n', '--net', required=True, help='Network the port should be created')
         self.create_parser.add_argument('-s', '--subnet', help='Subnet the port should be created')
         self.create_parser.add_argument('--ip', help='Fixed ip address should be allocated')
+        self.create_parser.add_argument('--tag', nargs='*', help='Tag')
 
         self.update_parser.add_argument('-q', '--qos', metavar='Qos-ID', nargs='*', help='Only ingress and egress Qos needed, remove Qos if zero input')
+        self.update_parser.add_argument('--tag', nargs='*', help='Tag')
 
         self.list_parser.add_argument('--net', nargs='+', help='Filter by network')
         self.list_parser.add_argument('--mac', nargs='+', help='Filter by mac address')
@@ -454,6 +469,8 @@ class parser_port(parser_base):
             self.res.ip = args.ip
         if 'qos' in args:
             self.res.qos = args.qos
+        if 'tag' in args:
+            self.res.resource['tags'] = args.tag
         self.cmd_action()
 
 class parser_floatingip(parser_base):
@@ -835,11 +852,14 @@ class parser_policy(parser_base):
         self.res = FwPolicy()
         self.create_parser.add_argument('-r', '--rules', nargs='+', help='Rule to be associated')
         self.create_parser.add_argument('--audited', type=bool)
+        self.update_parser.add_argument('-r', '--rules', nargs='+', help='Rule to be associated')
+        self.update_parser.add_argument('--audited', type=bool)
         self.insert_parser = self.operparser.add_parser('insert', argument_default=argparse.SUPPRESS, help='insert a rule')
         self.insert_parser.add_argument('--oper', default='insert', help=argparse.SUPPRESS)
         self.insert_parser.add_argument('-r', '--rule')
         self.insert_parser.add_argument('name', metavar='NAME', help='Name or ID to be updated')
         self.insert_parser.add_argument('-b', '--before', metavar='RULE', help='Insert before this rule')
+        self.insert_parser.add_argument('-a', '--after', metavar='RULE', help='Insert after this rule')
         self.remove_parser = self.operparser.add_parser('remove', argument_default=argparse.SUPPRESS, help='remove a rule')
         self.remove_parser.add_argument('--oper', default='remove', help=argparse.SUPPRESS)
         self.remove_parser.add_argument('name', metavar='NAME', help='Name or ID to be updated')
@@ -857,6 +877,8 @@ class parser_policy(parser_base):
             self.res.rule = self.name_to_id(FwRule(), args.rule)
         if 'before' in args:
             self.res.insert_before = self.name_to_id(FwRule(), args.before)
+        if 'after' in args:
+            self.res.resource['insert_after'] = self.name_to_id(FwRule(), args.after)
         self.cmd_action()
 
 class parser_fwrule(parser_base):
@@ -1049,7 +1071,7 @@ class parser_provider(parser_base):
         parser.set_defaults(func=self.cmd_provider)
 
     def cmd_provider(self, args):
-        debug_out('cmd_provider: ', args)
+        debug_out(sys._getframe().f_code.co_name, ': ', args)
         self.cmd_base(args)
         if 'interfaces' in args:
             interfaces = []
@@ -1078,7 +1100,7 @@ class parser_nodes():
         self.delete_parser.set_defaults(func=self.cmd_delete)
 
     def cmd_list(self, args):
-        debug_out('cmd_list: ', args)
+        debug_out(sys._getframe().f_code.co_name, ': ', args)
         nodes_map = {'vrouter': 'virtual-routers', 'control': 'bgp-routers', 'config': 'config-nodes',
                      'configdb': 'config-database-nodes', 'analytics': 'analytics-nodes', 'analyticsdb': 'database-nodes'}
         self.res.url = '/' + nodes_map[args.type]
@@ -1124,7 +1146,7 @@ class parser_prouter(parser_base):
         parser.set_defaults(func=self.cmd_prouter)
 
     def cmd_prouter(self, args):
-        debug_out('cmd_provider: ', args)
+        debug_out(sys._getframe().f_code.co_name, ': ', args)
         self.cmd_base(args)
         if 'mgmt_ip' in args:
             self.res.mgmt_ip = args.mgmt_ip
@@ -1134,6 +1156,176 @@ class parser_prouter(parser_base):
             self.res.router_type = args.router_type
         if 'check' in args:
             self.res.check = args.check
+        self.cmd_action()
+
+class parser_tag(parser_base):
+    def __init__(self, parser):
+        super().__init__(parser)
+        self.res = Tag()
+        self.create_parser.add_argument('--type', help='type name')
+        self.create_parser.add_argument('--value', help='tag value string')
+        self.update_parser.add_argument('--type',  help='type name')
+        self.update_parser.add_argument('--value', help='tag value string')
+        parser.set_defaults(func=self.cmd_tag)
+
+    def cmd_tag(self, args):
+        debug_out('cmd_tag: ', args)
+        self.cmd_base(args)
+        if 'type' in args:
+            self.res.type_name = args.type
+        if 'value' in args:
+            self.res.value = args.value
+        self.cmd_action()
+
+class parser_address_group(parser_base):
+    def __init__(self, parser):
+        super().__init__(parser)
+        self.res = AddressGroup()
+        self.create_parser.add_argument('--prefixes', nargs='*', help='list of prefix uuid')
+        self.update_parser.add_argument('--prefixes', nargs='*', help='list of prefix uuid')
+        parser.set_defaults(func=self.cmd_address_group)
+
+    def cmd_address_group(self, args):
+        debug_out(sys._getframe().f_code.co_name, ': ', args)
+        self.cmd_base(args)
+        if 'prefixes' in args:
+            self.res.resource['prefixes'] = args.prefixes
+        self.cmd_action()
+
+class parser_service_group(parser_base):
+    def __init__(self, parser):
+        super().__init__(parser)
+        self.res = ServiceGroup()
+        self.create_parser.add_argument('--services', nargs='*', metavar='{"protocol":value,"port":value}',
+                                        type=json.loads, help='protocol support: TCP/UDP/ICMP')
+        self.update_parser.add_argument('--services', nargs='*', metavar='{"protocol":value,"port":value}',
+                                        type=json.loads, help='type name')
+        parser.set_defaults(func=self.cmd_service_group)
+
+    def cmd_service_group(self, args):
+        debug_out(sys._getframe().f_code.co_name, ': ', args)
+        self.cmd_base(args)
+        if 'services' in args:
+            self.res.resource['services'] = args.services
+        self.cmd_action()
+
+class parser_seg_fw(parser_base):
+    def __init__(self, parser):
+        self.parser = parser
+        subparser = self.parser.add_subparsers()
+        firewall = subparser.add_parser('firewall', help='Firewall group')
+        parser_seg_firewall(firewall)
+        policy = subparser.add_parser('policy', help='Firewall policy')
+        parser_seg_policy(policy)
+        rule = subparser.add_parser('rule', help='Policy rule')
+        parser_seg_fwrule(rule)
+        parser.set_defaults(func=self.cmd_fw)
+
+    def cmd_fw(self, args):
+        self.parser.print_usage()
+
+class parser_seg_firewall(parser_base):
+    def __init__(self, parser):
+        super().__init__(parser)
+        self.res = SegFirewall()
+        self.create_parser.add_argument('-t', '--tag', nargs='?', help='Tag to be associated')
+        self.create_parser.add_argument('-p', '--policy', nargs='*', help='Policy to be associated')
+        self.update_parser.add_argument('-t', '--tag', nargs='?', help='Tag to be associated')
+        self.update_parser.add_argument('-p', '--policy', nargs='*', help='Policy to be associated')
+        parser.set_defaults(func=self.cmd_firewall)
+
+    def cmd_firewall(self, args):
+        debug_out('cmd_firewall: ', args)
+        self.cmd_base(args)
+        if 'policy' in args:
+            self.res.resource['firewall_policys'] = [self.name_to_id(SegFirewallPolicy(), p) for p in args.policy]
+        if 'tag' in args:
+            self.res.resource['tag'] = args.tag
+        self.cmd_action()
+
+class parser_seg_policy(parser_base):
+    def __init__(self, parser):
+        super().__init__(parser)
+        self.res = SegFirewallPolicy()
+        self.create_parser.add_argument('-r', '--rules', nargs='*', help='Rule to be associated')
+        self.update_parser.add_argument('-r', '--rules', nargs='*', help='Rule to be associated')
+        self.insert_parser = self.operparser.add_parser('insert', argument_default=argparse.SUPPRESS, help='insert a rule')
+        self.insert_parser.add_argument('--oper', default='insert', help=argparse.SUPPRESS)
+        self.insert_parser.add_argument('-r', '--oper-rules', nargs='*')
+        self.insert_parser.add_argument('name', metavar='NAME', help='Name or ID to be updated')
+        self.insert_parser.add_argument('-b', '--before', metavar='RULE', help='Insert before this rule')
+        self.insert_parser.add_argument('-a', '--after', metavar='RULE', help='Insert after this rule')
+        self.remove_parser = self.operparser.add_parser('remove', argument_default=argparse.SUPPRESS, help='remove a rule')
+        self.remove_parser.add_argument('--oper', default='remove', help=argparse.SUPPRESS)
+        self.remove_parser.add_argument('name', metavar='NAME', help='Name or ID to be updated')
+        self.remove_parser.add_argument('-r', '--oper-rules', nargs='*', metavar='RULE', help='Remove rules')
+        parser.set_defaults(func=self.cmd_policy)
+
+    def cmd_policy(self, args):
+        debug_out('cmd_policy: ', args)
+        self.cmd_base(args)
+        if 'rules' in args:
+            self.res.resource['firewall_rules'] = [self.name_to_id(SegFirewallRule(), r) for r in args.rules]
+        if 'oper_rules' in args:
+            self.res.resource['oper_rules'] = [self.name_to_id(SegFirewallRule(), r) for r in args.oper_rules]
+        if 'before' in args:
+            self.res.resource['insert_before'] = self.name_to_id(SegFirewallRule(), args.before)
+        if 'after' in args:
+            self.res.resource['insert_after']= self.name_to_id(SegFirewallRule(), args.after)
+        self.cmd_action()
+
+class parser_seg_fwrule(parser_base):
+    def __init__(self, parser):
+        super().__init__(parser)
+        self.res = SegFirewallRule()
+        self.create_parser.add_argument('-d', '--direction', choices=['<>', '<', '>'])
+        self.create_parser.add_argument('--action', choices=['deny','pass'])
+        self.create_parser.add_argument('--match-tags', help='Tags to be matched, available tags are:'
+                                                             'application, deployment, tier, site')
+        self.create_parser.add_argument('--service-group', help='Service Group name')
+        self.create_parser.add_argument('--service', type=json.loads, metavar='{"protocol":value,'
+                                                          '"src_port":value,"dst_port":value}',
+                                                     help='Protocol supported:'
+                                                          'ah, dccp, egp, esp, gre, igmp, ospf, pgm,'
+                                                          'rsvp, sctp, udplite, vrrp, icmp6, icmp, tcp, udp, any')
+        self.create_parser.add_argument('--endpoint1', type=json.loads, metavar='{"address_group":value,'
+                                        '"tags":[values],"network_id":value,"any":bool}')
+        self.create_parser.add_argument('--endpoint2', type=json.loads, metavar='{"address_group":value,'
+                                        '"tags":[values],"network_id":value,"any":bool}')
+
+        self.update_parser.add_argument('-d', '--direction', choices=['<>', '<', '>'])
+        self.update_parser.add_argument('--action', choices=['deny','pass'])
+        self.update_parser.add_argument('--match-tags', help='Tags to be matched, available tags are:'
+                                                             'application, deployment, tier, site')
+        self.update_parser.add_argument('--service-group', help='Service Group name')
+        self.update_parser.add_argument('--service', type=json.loads, metavar='{"protocol":value,'
+                                                          '"src_port":value,"dst_port":value}',
+                                                     help='Protocol supported:'
+                                                          'ah, dccp, egp, esp, gre, igmp, ospf, pgm,'
+                                                          'rsvp, sctp, udplite, vrrp, icmp6, icmp, tcp, udp, any')
+        self.update_parser.add_argument('--endpoint1', type=json.loads, metavar='{"address_group":value,'
+                                        '"tags":[values],"network_id":value,"any":bool}')
+        self.update_parser.add_argument('--endpoint2', type=json.loads, metavar='{"address_group":value,'
+                                        '"tags":[values],"network_id":value,"any":bool}')
+        parser.set_defaults(func=self.cmd_rule)
+
+    def cmd_rule(self, args):
+        debug_out('cmd_rule: ', args)
+        self.cmd_base(args)
+        if 'direction' in args:
+            self.res.resource['direction'] = args.direction
+        if 'action' in args:
+            self.res.resource['action'] = args.action
+        if 'match_tags' in args:
+            self.res.resource['match_tags'] = args.match_tags
+        if 'service_group' in args:
+            self.res.resource['service_group'] = args.service_group
+        if 'service' in args:
+            self.res.resource['service'] = args.service
+        if 'endpoint1' in args:
+            self.res.resource['endpoint_1'] = args.endpoint1
+        if 'endpoint2' in args:
+            self.res.resource['endpoint_2'] = args.endpoint2
         self.cmd_action()
 
 class ResourceAction():
@@ -1336,7 +1528,7 @@ class RestAPI():
         DEBUG(res.status_code, 'length:', len(res.content), 'time:', time.time()-tm)
         if res.text:
             try:
-                #DEBUG(res.json())
+                DEBUG(json.dumps(res.json()))
                 return res.status_code, res.json()
             except:
                 DEBUG(res.text)
@@ -2264,6 +2456,42 @@ class PhysicalRouter(Resource):
     @connect_check.setter
     def connect_check(self, value):
         self.resource['virtual_router_type'] = value
+
+class Tag(Resource):
+    def __init__(self, res_id=None, name=None):
+        super().__init__('tag', res_id=res_id, name=name)
+    @property
+    def type_name(self):
+        return self.resource.get('type_name')
+    @type_name.setter
+    def type_name(self, value):
+        self.resource['type_name'] = value
+    @property
+    def value(self):
+        return self.resource.get('value')
+    @value.setter
+    def value(self, value):
+        self.resource['value'] = value
+
+class ServiceGroup(Resource):
+    def __init__(self, res_id=None, name=None):
+        super().__init__('service_group', res_id=res_id, name=name)
+
+class AddressGroup(Resource):
+    def __init__(self, res_id=None, name=None):
+        super().__init__('address_group', res_id=res_id, name=name)
+
+class SegFirewall(Resource):
+    def __init__(self, res_id=None, name=None):
+        super().__init__('segment_firewall_group', res_id=res_id, name=name)
+
+class SegFirewallPolicy(Resource):
+    def __init__(self, res_id=None, name=None):
+        super().__init__('segment_firewall_policy', res_id=res_id, name=name)
+
+class SegFirewallRule(Resource):
+    def __init__(self, res_id=None, name=None):
+        super().__init__('segment_firewall_rule', res_id=res_id, name=name)
 
 if __name__ == '__main__':
     main()
