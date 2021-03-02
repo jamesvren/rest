@@ -177,12 +177,9 @@ def vr_interface(vrouter_ip, show_ns=False):
     print(vm_info)
 
 def pair_check(sep, value):
-    attr = value.split(sep)
-    if len(attr) != 2:
+    k,o,v= value.partition(sep)
+    if not k or not o or not v:
         raise ValueError()
-    for i in attr:
-       if not i:
-           raise ValueError()
     return value
 
 def kv(value):
@@ -221,10 +218,10 @@ class parser_base():
         self.update_parser = self.operparser.add_parser('update', argument_default=argparse.SUPPRESS, help='Update a resource')
         self.update_parser.add_argument('--oper', default='update', help=argparse.SUPPRESS)
         self.update_parser.add_argument('name', metavar='NAME', help='Name or ID to be updated')
-        self.update_parser.add_argument('--attr', type=kv, metavar='KEY=VALUE', nargs='+',
+        self.update_parser.add_argument('--attr', type=json.loads,
                                         help='Add additional attribution to a resource')
         self.update_parser.add_argument('--shared', type=BOOL, help='Shared resource')
-        self.update_parser.add_argument('--enabled', type=BOOL, help='Shared resource')
+        self.update_parser.add_argument('--enabled', type=BOOL)
 
         self.show_parser = self.operparser.add_parser('show', argument_default=argparse.SUPPRESS, help='Show a resource')
         self.show_parser.add_argument('--oper', default='show', help=argparse.SUPPRESS)
@@ -255,9 +252,10 @@ class parser_base():
             self.res.id = args.id
             self.res.name = args.name
         if 'attr' in args:
-            for attr in args.attr:
-                kv = attr.split('=')
-                self.res.resource[kv[0]] = kv[1]
+            self.res.resource.update(args.attr)
+            #for attr in args.attr:
+            #    k,_,v = attr.partition('=')
+            #    self.res.resource[k] = v
 
     def cmd_list(self, args):
         debug_out('cmd_list: ', args)
@@ -1199,7 +1197,7 @@ class parser_service_group(parser_base):
         self.create_parser.add_argument('--services', nargs='*', metavar='{"protocol":value,"port":value}',
                                         type=json.loads, help='protocol support: TCP/UDP/ICMP')
         self.update_parser.add_argument('--services', nargs='*', metavar='{"protocol":value,"port":value}',
-                                        type=json.loads, help='type name')
+                                        type=json.loads, help='protocol support: TCP/UDP/ICMP')
         parser.set_defaults(func=self.cmd_service_group)
 
     def cmd_service_group(self, args):
@@ -1280,7 +1278,7 @@ class parser_seg_fwrule(parser_base):
         self.res = SegFirewallRule()
         self.create_parser.add_argument('-d', '--direction', choices=['<>', '<', '>'])
         self.create_parser.add_argument('--action', choices=['deny','pass'])
-        self.create_parser.add_argument('--match-tags', help='Tags to be matched, available tags are:'
+        self.create_parser.add_argument('--match-tags', nargs='*', help='Tags to be matched, available tags are:'
                                                              'application, deployment, tier, site')
         self.create_parser.add_argument('--service-group', help='Service Group name')
         self.create_parser.add_argument('--service', type=json.loads, metavar='{"protocol":value,'
@@ -1295,7 +1293,7 @@ class parser_seg_fwrule(parser_base):
 
         self.update_parser.add_argument('-d', '--direction', choices=['<>', '<', '>'])
         self.update_parser.add_argument('--action', choices=['deny','pass'])
-        self.update_parser.add_argument('--match-tags', help='Tags to be matched, available tags are:'
+        self.update_parser.add_argument('--match-tags', nargs='*', help='Tags to be matched, available tags are:'
                                                              'application, deployment, tier, site')
         self.update_parser.add_argument('--service-group', help='Service Group name')
         self.update_parser.add_argument('--service', type=json.loads, metavar='{"protocol":value,'
