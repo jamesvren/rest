@@ -54,18 +54,25 @@ def out(*msg):
     if not disable_out:
         print(*msg)
 
-def main():
-    parser = argparse.ArgumentParser()
+def main(args_str):
+    parser = argparse.ArgumentParser(args_str)
     parser.add_argument('-f', '--file', help='Read from Json file')
     parser.add_argument('--host', help='Host to get token from')
+    parser.add_argument('--token', action='store_true', help='Get token only')
     parser.add_argument('--password', help='Password to login host')
     parser.add_argument('--debug', action='store_true', help='Output curl command for each request')
     parser.add_argument('-g', '--gen-auth', action='store_true', help='Generate authenticate file')
     parser.add_argument('-i', '--interface', metavar='HOST', nargs='+', help='Get vrouter interface in the host')
     parser.add_argument('--netns', action='store_true', help='Show namespace VM')
     parser.add_argument('--no-output', action='store_true', help='Don not print result')
-    def cmd_file(args):
-        debug_out('cmd_file: ', args)
+    def cmd_common(args):
+        debug_out('cmd_common: ', args)
+        if args.token:
+            config = pasrse_config_file()
+            api = RestAPI(config['auth_host'], config['auth_port'], config['version'], config['user'], config['password'], config['project'])
+            token = api.get_token()
+            out(token)
+            return
         if args.interface:
             for ip in args.interface:
                 vr_interface(ip, args.netns)
@@ -108,7 +115,6 @@ def main():
         if not args.file:
             parser.print_usage()
             return
-        token = None
         config = pasrse_config_file(args.file)
         api = RestAPI(config['auth_host'], config['auth_port'], config['version'], config['user'], config['password'], config['project'])
         if 'header' in config:
@@ -120,14 +126,14 @@ def main():
             disable_out = True
         out(json.dumps(result, indent=4))
 
-    parser.set_defaults(func=cmd_file)
+    parser.set_defaults(func=cmd_common)
     subparsers = parser.add_subparsers()
     for feature in sorted(features.keys()):
         p = subparsers.add_parser(feature, argument_default=argparse.SUPPRESS, help=features[feature])
         ft = feature.replace('-', '_')
         if 'parser_%s' % (ft) in globals():
             globals()['parser_%s' % (ft)](p)
-    args = parser.parse_args()
+    args = parser.parse_args(args_str)
     if args.debug:
         global debug
         debug = True
@@ -188,6 +194,9 @@ def kv(value):
 def RANGE(value):
     return pair_check(':', value)
 
+def RANGE2(value):
+    return pair_check('-', value)
+
 def BOOL(value):
     if value.lower() in ['true', 'yes']:
         return True
@@ -207,7 +216,7 @@ class parser_base():
         self.create_parser.add_argument('--oper', default='create', help=argparse.SUPPRESS)
         self.create_parser.add_argument('name', metavar='NAME', help='Name or ID to be created')
         self.create_parser.add_argument('--id', help='Resource ID to be created')
-        self.create_parser.add_argument('--attr', type=kv, metavar='KEY=VALUE', nargs='+',
+        self.create_parser.add_argument('--attr', type=json.loads,
                                         help='Add additional attribution to a resource')
         self.create_parser.add_argument('--shared', action='store_true', help='Shared resource')
 
@@ -229,7 +238,7 @@ class parser_base():
 
         self.list_parser = self.operparser.add_parser('list', argument_default=argparse.SUPPRESS, help='Show all resources of this type')
         self.list_parser.add_argument('--oper', default='list', help=argparse.SUPPRESS)
-        self.list_parser.add_argument('--id', nargs='+', help='Filter by device id')
+        self.list_parser.add_argument('--id', nargs='+', help='Filter by id')
         self.list_parser.add_argument('--name', nargs='+', help='Filter by name')
         self.list_parser.add_argument('--filters', type=json.loads)
         self.list_parser.set_defaults(func=self.cmd_list)
@@ -329,7 +338,7 @@ class parser_subnet(parser_base):
         self.create_parser.add_argument('-p', '--prefix', required=True, help='Prefix of a ubnet')
         self.create_parser.add_argument('--no-dhcp', action='store_true', help='Disable DHCP')
         self.create_parser.add_argument('--no-gateway', action='store_true', help='Disable gateway')
-        self.create_parser.add_argument('--pools', type=RANGE, metavar='START:END', nargs='+',
+        self.create_parser.add_argument('--pools', type=RANGE2, metavar='START-END', nargs='+',
                                         help='Allocation pools')
 
         self.list_parser.add_argument('--net', nargs='+', help='Filter by network')
@@ -1811,7 +1820,7 @@ class Subnet(Resource):
     @gateway.setter
     def gateway(self, value):
         self.resource['gateway_ip'] = value
-    def add_alloc_pool(start, end):
+    def add_alloc_pool(self, start, end):
         pool = self.resource.get('allocation_pools')
         if pool:
             pool.append({'start': start, 'end': end})
@@ -2492,4 +2501,7 @@ class SegFirewallRule(Resource):
         super().__init__('segment_firewall_rule', res_id=res_id, name=name)
 
 if __name__ == '__main__':
-    main()
+    try:
+        main(sys.argv[1:])
+    except KeyboardInterrupt:
+        pass
