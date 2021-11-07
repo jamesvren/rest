@@ -20,7 +20,7 @@ class TestBase(metaclass=ABCMeta):
 # module_on = ['rest', 'db', 'case']
 module_on = [
     #'rest',
-    #'db',
+    'db',
     'case',
 ]
 

@@ -10,6 +10,7 @@ import argparse
 import time
 import gevent
 from testbase import DEBUG
+from db import ResourceDB
 
 # Rest API tools for all kinds of resources
 class RestAPI():
@@ -178,6 +179,7 @@ def pasrse_config_file(config_file=None):
 class ResourceAction():
     def __init__(self, res_obj=None):
         self.res = res_obj
+        self.err = None
 
         config = pasrse_config_file()
         if not config:
@@ -190,9 +192,11 @@ class ResourceAction():
             self.url = self.api.encode_url(host=self.host, port=self.port, uri=res_obj.url)
 
     def post(self):
+        self.err = None
         code, result = self.api.req('post', self.url, self.res.body)
         if code != 200:
             print(code, result)
+            self.err = result
             return None
         return result
 
@@ -231,53 +235,6 @@ class ResourceAction():
             return None
         return ret
 
-class ResourceDB():
-    objs = {}
-
-    @classmethod
-    def insert(cls, obj):
-        tid = id(gevent.getcurrent())
-        db = cls.objs.get(tid)
-        if db:
-            db.append(obj)
-        else:
-            cls.objs[tid] = [obj]
-        DEBUG('db', f'  Save resource {obj.type}:{obj.name}:{obj.id} to DB({tid}).')
-
-    @classmethod
-    def remove(cls, obj):
-        tid = id(gevent.getcurrent())
-        db = cls.objs.get(tid, [])
-        if db:
-            try:
-                db.remove(obj)
-            except ValueError as e:
-                print(f'Error: {obj}, {str(e)}')
-
-    @classmethod
-    def clear(cls):
-        tid = id(gevent.getcurrent())
-        db = cls.objs.get(tid, [])
-        for obj in db[::-1]:
-            DEBUG('db', f'  Clear {obj.type} -> {obj.name}:{obj.id}')
-            obj.delete()
-        db.clear()
-
-    @classmethod
-    def clearall(cls):
-        DEBUG('db', '  To clear all DBs ...')
-        for db in cls.objs.values():
-            for obj in db[::-1]:
-                DEBUG('db', f'  Clear {obj.type} -> {obj.name}:{obj.id}')
-                obj.delete()
-            db.clear()
-
-    @classmethod
-    def dump(cls):
-        for db in cls.objs.values():
-            for obj in db:
-                print(f'  [cached] {obj.type} -> {obj.name}:{obj.id}')
-
 def save(func):
     def wrapper(obj, *args, **kwargs):
         r = func(obj, *args, **kwargs)
@@ -293,11 +250,13 @@ def remove(func):
     return wrapper
 
 class Resource():
-    def __init__(self, res_type, id=None, name=None):
+    def __init__(self, res_type, uri=None, id=None, name=None):
         self.type = res_type
         self._id = id
         self._name = name
         self.url = '/neutron/' + self.type
+        if uri:
+            self.url = uri
         self.resource = { 'tenant_id': 'ad88dd5d24ce4e2189a6ae7491c33e9d' }
         self.filters = {}
         self.fields = []
@@ -883,7 +842,7 @@ class VpnEndpiointGroup(Resource):
     def endpoint_type(self):
         return self.resource.get('endpoint_type')
     @endpoint_type.setter
-    def endpoints(self, value):
+    def endpoint_type(self, value):
         self.resource['endpoint_type'] = value
 
 class VpnService(Resource):
@@ -894,11 +853,11 @@ class VpnService(Resource):
         return self.resource.get('router_id')
     @router.setter
     def router(self, value):
-        self.resource['router'] = value
+        self.resource['router_id'] = value
 
 class VpnConnection(Resource):
     def __init__(self, id=None, name=None):
-        super().__init__('firewall', id=id, name=name)
+        super().__init__('ipsec_site_connection', id=id, name=name)
     @property
     def ike(self):
         return self.resource.get('ike_policy_id')

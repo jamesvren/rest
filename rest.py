@@ -37,6 +37,7 @@ features = {
     'address-group': 'Address Group',
     'service-group': 'Service Group',
     'seg-fw': 'Segment Firewall',
+    'ipam': 'IP Address Management',
 }
 
 debug = False
@@ -54,8 +55,8 @@ def out(*msg):
     if not disable_out:
         print(*msg)
 
-def main(args_str):
-    parser = argparse.ArgumentParser(args_str)
+def main():
+    parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument('-f', '--file', help='Read from Json file')
     parser.add_argument('--host', help='Host to get token from')
     parser.add_argument('--token', action='store_true', help='Get token only')
@@ -133,7 +134,7 @@ def main(args_str):
         ft = feature.replace('-', '_')
         if 'parser_%s' % (ft) in globals():
             globals()['parser_%s' % (ft)](p)
-    args = parser.parse_args(args_str)
+    args = parser.parse_args()
     if args.debug:
         global debug
         debug = True
@@ -228,7 +229,7 @@ class parser_base():
         self.update_parser.add_argument('--oper', default='update', help=argparse.SUPPRESS)
         self.update_parser.add_argument('name', metavar='NAME', help='Name or ID to be updated')
         self.update_parser.add_argument('--attr', type=json.loads,
-                                        help='Add additional attribution to a resource')
+                                        help='Json to be add additional attribution to a resource')
         self.update_parser.add_argument('--shared', type=BOOL, help='Shared resource')
         self.update_parser.add_argument('--enabled', type=BOOL)
 
@@ -315,6 +316,10 @@ class parser_net(parser_base):
         group.add_argument('--vlan', default=argparse.SUPPRESS, help='VLAN ID for public network')
         group.add_argument('--vxlan', default=argparse.SUPPRESS, help='VXLAN ID for private network')
         self.create_parser.add_argument('--tag', nargs='*', help='Tag')
+        self.create_parser.add_argument('--forward', choices=['l2', 'l3', 'l2_l3'], help='Forwarding mode')
+        self.create_parser.add_argument('--mode', choices=['flat-subnet-only', 'user-defined-subnet-preferred',
+                                                           'flat-subnet-preferred', 'user-defined-subnet-only'],
+                                                  help='Address allocation mode')
         parser.set_defaults(func=self.cmd_net)
 
     def cmd_net(self, args):
@@ -328,6 +333,24 @@ class parser_net(parser_base):
             self.res.segment = args.vxlan
         if 'tag' in args:
             self.res.resource['tag'] = args.tag
+        if 'mode' in args:
+            self.res.resource['address_allocation_mode'] = args.mode
+        if 'forward' in args:
+            self.res.resource['forwarding_mode'] = args.forward
+        self.cmd_action()
+
+class parser_ipam(parser_base):
+    def __init__(self, parser):
+        super().__init__(parser)
+        self.res = IpAM()
+        self.create_parser.add_argument('--method', choices=['flat-subnet', 'user-defined-subnet'], help='Method to create subnet')
+        parser.set_defaults(func=self.cmd_ipam)
+
+    def cmd_ipam(self, args):
+        debug_out('cmd_ipam: ', args)
+        self.cmd_base(args)
+        if 'method' in args:
+            self.res.resource['ipam_subnet_method'] = args.method
         self.cmd_action()
 
 class parser_subnet(parser_base):
@@ -340,6 +363,7 @@ class parser_subnet(parser_base):
         self.create_parser.add_argument('--no-gateway', action='store_true', help='Disable gateway')
         self.create_parser.add_argument('--pools', type=RANGE2, metavar='START-END', nargs='+',
                                         help='Allocation pools')
+        self.create_parser.add_argument('--ipam', help='IPAM to be used')
 
         self.list_parser.add_argument('--net', nargs='+', help='Filter by network')
         self.list_parser.add_argument('--prefix', nargs='+', help='Filter by prefix')
@@ -353,13 +377,15 @@ class parser_subnet(parser_base):
         if 'prefix' in args:
             self.res.cidr = args.prefix
         if 'no_dhcp' in args:
-            self.res.dhcp = not no_dhcp
+            self.res.dhcp = '0.0.0.0'
         if 'no_gateway' in args:
-            self.res.gateway = not no_gateway
+            self.res.gateway = '0.0.0.0'
         if 'pools' in args:
             for pool in args.pools:
                 pool = pool.split('-')
                 self.res.add_alloc_pool(pool[0], pool[1])
+        if 'ipam' in args:
+            self.res.resource['ipam_fq_name'] = ['default-domain', 'ArcherAdmin', args.ipam]
         self.cmd_action()
 
 class parser_router(parser_base):
@@ -457,6 +483,14 @@ class parser_port(parser_base):
         self.update_parser.add_argument('-q', '--qos', metavar='Qos-ID', nargs='*', help='Only ingress and egress Qos needed, remove Qos if zero input')
         self.update_parser.add_argument('--tag', nargs='*', help='Tag')
 
+        subparser = self.update_parser.add_subparsers()
+        mr = subparser.add_parser('mirror', argument_default=argparse.SUPPRESS)
+        mr.add_argument('-n', '--mirror-name', help='Analyzer name')
+        mr.add_argument('--net', help='Mirror network id')
+        mr.add_argument('-i', '--ip', help='Analyzer IP address')
+        mr.add_argument('-m', '--mac', help='Analyzer mac address')
+        mr.set_defaults(func=self.cmd_mirror)
+
         self.list_parser.add_argument('--net', nargs='+', help='Filter by network')
         self.list_parser.add_argument('--mac', nargs='+', help='Filter by mac address')
         self.list_parser.add_argument('--status', nargs='+', help='Filter by status')
@@ -478,6 +512,21 @@ class parser_port(parser_base):
             self.res.qos = args.qos
         if 'tag' in args:
             self.res.resource['tags'] = args.tag
+        self.cmd_action()
+
+    def cmd_mirror(self, args):
+        debug_out('cmd_mirror: ', args)
+        self.cmd_base(args)
+        self.res.resource['interface_mirror'] = {}
+        res = self.res.resource['interface_mirror']
+        if 'net' in args:
+            res['network_id'] = self.name_to_id(VirtualNetwork(), args.net)
+        if 'ip' in args:
+            res['analyzer_ip_address'] = args.ip
+        if 'mac' in args:
+            res['analyzer_mac_address'] = args.mac
+        if 'mirror_name' in args:
+            res['analyzer_name'] = args.mirror_name
         self.cmd_action()
 
 class parser_floatingip(parser_base):
@@ -576,7 +625,7 @@ class parser_listener(parser_base):
         self.create_parser.add_argument('--lb', required=True, help='LoadBalancer for listener')
         self.create_parser.add_argument('--port', required=True, help='Protocol port to listen')
         self.create_parser.add_argument('-p', '--protocol', required=True, help='Protocol to listen',
-                                        choices=['tcp', 'http', 'https', 'terminated_https'])
+                                        choices=['udp', 'tcp', 'http', 'https', 'terminated_https'])
         parser.set_defaults(func=self.cmd_listener)
 
     def cmd_listener(self, args):
@@ -599,7 +648,7 @@ class parser_pool(parser_base):
         self.create_parser.add_argument('-a', '--algorithm', default='round_robin', help='Protocol port to listen',
                                         choices=['round_robin', 'least_connections', 'source_ip'])
         self.create_parser.add_argument('-p', '--protocol', required=True, help='Protocol to listen',
-                                        choices=['tcp', 'http', 'https', 'terminated_https'])
+                                        choices=['udp', 'tcp', 'http', 'https', 'terminated_https'])
         self.create_parser.set_defaults(func=self.cmd_pool_create)
         parser.set_defaults(func=self.cmd_pool)
 
@@ -689,6 +738,8 @@ class parser_vpn(parser_base):
         parser_service(service)
         connection = subparser.add_parser('connection', help='IpSec connection')
         parser_connection(connection)
+        p2s = subparser.add_parser('p2s', help='IpSec peer 2 site connection')
+        parser_p2s(p2s)
         parser.set_defaults(func=self.cmd_vpn)
 
     def cmd_vpn(self, args):
@@ -746,8 +797,8 @@ class parser_endpoint(parser_base):
     def __init__(self, parser):
         super().__init__(parser)
         self.res = VpnEndpiointGroup()
-        self.create_parser.add_argument('-e', '--endpoints', metavar='IP', required=True,
-                                        nargs='+', help='IP address list')
+        self.create_parser.add_argument('-e', '--endpoints', metavar='PREFIX', required=True,
+                                        nargs='+', help='PREFIX list')
         self.create_parser.add_argument('-t', '--endpoint-type', required=True, choices=['local','remote'])
         parser.set_defaults(func=self.cmd_endpoint)
 
@@ -771,7 +822,7 @@ class parser_service(parser_base):
         debug_out('cmd_servcie: ', args)
         self.cmd_base(args)
         if 'router' in args:
-            self.res.router = args.router
+            self.res.router = self.name_to_id(Router(), args.router)
         self.cmd_action()
 
 class parser_connection(parser_base):
@@ -807,6 +858,56 @@ class parser_connection(parser_base):
             self.res.local_endpoint = self.name_to_id(VpnEndpiointGroup(), args.local_endpoint)
         if 'peer_endpoint' in args:
             self.res.peer_endpoint = self.name_to_id(VpnEndpiointGroup(), args.peer_endpoint)
+        self.cmd_action()
+
+class parser_p2s(parser_base):
+    def __init__(self, parser):
+        super().__init__(parser)
+        self.res = VpnP2SConnection()
+        self.create_parser.add_argument('-a', '--auth-mode', help='"cert" only')
+        self.create_parser.add_argument('--ca', help='CA cert, pem format')
+        self.create_parser.add_argument('-k', '--server-key', help='Private key in server, pem format')
+        self.create_parser.add_argument('-c', '--server-cert', help='CA cert in sever, pem format')
+        self.create_parser.add_argument('-e', '--exp-list', help='Expired cert, pem format')
+        self.create_parser.add_argument('-v', '--vpn-service', help='VPN Service')
+        self.create_parser.add_argument('-s', '--local-subnets', nargs='+', help='Prefix client can access. Must be connected with router.')
+        self.create_parser.add_argument('-p', '--pool', nargs='+', help='Client used address pool, not overlap with router subnet. Only one v4 and v6')
+        self.update_parser.add_argument('--ca', help='CA cert, pem format')
+        self.update_parser.add_argument('-k', '--server-key', help='Private key in server, pem format')
+        self.update_parser.add_argument('-c', '--server-cert', help='CA cert in sever, pem format')
+        self.update_parser.add_argument('-e', '--exp-list', help='Expired cert, pem format')
+        msg = '''{action/interval/timeout}
+        action: clear, hold, restart, disabled or restart-by-peer, default hold
+        interval: default 30s
+        timeout: default 120s
+        '''
+        self.create_parser.add_argument('--dpd', help=msg)
+        self.create_parser.add_argument('--mss', help='TCP mss, default 1200')
+        parser.set_defaults(func=self.cmd_p2s)
+
+    def cmd_p2s(self, args):
+        debug_out('cmd_p2s: ', args)
+        self.cmd_base(args)
+        if 'auth_mode' in args:
+            self.res.auth_mode = args.auth_mode
+        if 'ca' in args:
+            self.res.cert = args.ca
+        if 'vpn_service' in args:
+            self.res.service = self.name_to_id(VpnService(), args.vpn_service)
+        if 'server_key' in args:
+            self.res.server_key = args.server_key
+        if 'server_cert' in args:
+            self.res.server_cert = args.server_cert
+        if 'exp_list' in args:
+            self.res.exp_cert_list = args.exp_list
+        if 'local_subnets' in args:
+            self.res.local_subnets = args.local_subnets
+        if 'pool' in args:
+            self.res.address_pool = args.pool
+        if 'mss' in args:
+            self.res.tcp_mss = args.mss
+        if 'dpd' in args:
+            self.res.dpd = json.loads(args.dpd)
         self.cmd_action()
 
 class parser_fw(parser_base):
@@ -924,7 +1025,7 @@ class parser_qos(parser_base):
     def __init__(self, parser):
         self.parser = parser
         subparser = self.parser.add_subparsers()
-        ratelimit = subparser.add_parser('ratelimit', help='Qos rate limit')
+        ratelimit = subparser.add_parser('ratelimit', help='Qos configuration')
         parser_ratelimit(ratelimit)
         ipgroup = subparser.add_parser('ipgroup', help='IP group rate limit')
         parser_ipgroup(ipgroup)
@@ -938,8 +1039,10 @@ class parser_ratelimit(parser_base):
         super().__init__(parser)
         self.res = Qos()
         self.create_parser.add_argument('-d', '--direction', choices=['ingress','egress'])
+        self.create_parser.add_argument('--dscp', nargs='*', help='Dscp marking rules')
         self.create_parser.add_argument('-r', '--rate', help='Max rate with bit')
         self.update_parser.add_argument('-r', '--rate', help='Max rate with bit')
+        self.update_parser.add_argument('--dscp', nargs='*', help='Dscp marking rules')
         parser.set_defaults(func=self.cmd_ratelimit)
 
     def cmd_ratelimit(self, args):
@@ -949,6 +1052,8 @@ class parser_ratelimit(parser_base):
             self.res.direction = args.direction
         if 'rate' in args:
             self.res.rate = args.rate
+        if 'dscp' in args:
+            self.res.resource['dscp_marking_rules'] = args.dscp
         self.cmd_action()
 
 class parser_ipgroup(parser_base):
@@ -1085,7 +1190,7 @@ class parser_provider(parser_base):
             for intf in args.interfaces:
                 i = intf.split('=')
                 interfaces.append({'host': i[0], 'nic': i[1]})
-            self.res.interfaces = args.interfaces
+            self.res.interfaces = interfaces
         self.cmd_action()
 
 class parser_nodes():
@@ -1404,6 +1509,8 @@ class ResourceAction():
         table = Table(4)
         table.from_json(result)
         print(table)
+        if isinstance(result, list):
+            print('Totoal resources: %s' % len(result))
 
     def put(self):
         code, result = self.api.req('put', self.url, self.res.body)
@@ -1993,7 +2100,7 @@ class LoadBalanceListener(Resource):
         return self.resource.get('protocol_port')
     @port.setter
     def port(self, value):
-        self.resource['protocol_port'] = value
+        self.resource['protocol_port'] = int(value)
 
 class LoadBalancePool(Resource):
     def __init__(self, res_id=None, name=None):
@@ -2044,7 +2151,7 @@ class LoadBalanceMember(Resource):
         return self.resource.get('protocol_port')
     @port.setter
     def port(self, value):
-        self.resource['protocol_port'] = value
+        self.resource['protocol_port'] = int(value)
     @property
     def ip(self):
         return self.resource.get('address')
@@ -2257,7 +2364,7 @@ class VpnEndpiointGroup(Resource):
     def endpoint_type(self):
         return self.resource.get('endpoint_type')
     @endpoint_type.setter
-    def endpoints(self, value):
+    def endpoint_type(self, value):
         self.resource['endpoint_type'] = value
 
 class VpnService(Resource):
@@ -2268,11 +2375,11 @@ class VpnService(Resource):
         return self.resource.get('router_id')
     @router.setter
     def router(self, value):
-        self.resource['router'] = value
+        self.resource['router_id'] = value
 
 class VpnConnection(Resource):
     def __init__(self, res_id=None, name=None):
-        super().__init__('firewall', res_id=res_id, name=name)
+        super().__init__('ipsec_site_connection', res_id=res_id, name=name)
     @property
     def ike(self):
         return self.resource.get('ike_policy_id')
@@ -2321,6 +2428,70 @@ class VpnConnection(Resource):
     @peer_endpoint.setter
     def peer_endpoint(self, value):
         self.resource['peer_ep_group_id'] = value
+
+class VpnP2SConnection(Resource):
+    def __init__(self, res_id=None, name=None):
+        super().__init__('ipsec_p2s_connection', res_id=res_id, name=name)
+    @property
+    def auth_mode(self):
+        return self.resource.get('auth_mode')
+    @auth_mode.setter
+    def auth_mode(self, value):
+        self.resource['auth_mode'] = value
+    @property
+    def cert(self):
+        return self.resource.get('ca_cert')
+    @cert.setter
+    def cert(self, value):
+        self.resource['ca_cert'] = value
+    @property
+    def server_key(self):
+        return self.resource.get('server_key')
+    @server_key.setter
+    def server_key(self, value):
+        self.resource['server_key'] = value
+    @property
+    def server_cert(self):
+        return self.resource.get('server_cert')
+    @server_cert.setter
+    def server_cert(self, value):
+        self.resource['server_cert'] = value
+    @property
+    def service(self):
+        return self.resource.get('vpn_service_id')
+    @service.setter
+    def service(self, value):
+        self.resource['vpn_service_id'] = value
+    @property
+    def exp_cert_list(self):
+        return self.resource.get('crl_list')
+    @exp_cert_list.setter
+    def exp_cert_list(self, value):
+        self.resource['crl_list'] = value
+    @property
+    def local_subnets(self):
+        return self.resource.get('local_subnets')
+    @local_subnets.setter
+    def local_subnets(self, value):
+        self.resource['local_subnets'] = value
+    @property
+    def address_pool(self):
+        return self.resource.get('address_pool')
+    @address_pool.setter
+    def address_pool(self, value):
+        self.resource['address_pool'] = value
+    @property
+    def tcp_mss(self):
+        return self.resource.get('tcp_mss')
+    @tcp_mss.setter
+    def tcp_mss(self, value):
+        self.resource['tcp_mss'] = value
+    @property
+    def dpd(self):
+        return self.resource.get('dpd')
+    @dpd.setter
+    def dpd(self, value):
+        self.resource['dpd'] = value
 
 class Qos(Resource):
     def __init__(self, res_id=None, name=None):
@@ -2380,7 +2551,7 @@ class Provider(Resource):
         return self.resource.get('interfaces')
     @interfaces.setter
     def interfaces(self, value):
-        self.resource['insterfaces'] = value
+        self.resource['interfaces'] = value
 
 class FloatingIP(Resource):
     def __init__(self, res_id=None, name=None):
@@ -2500,8 +2671,12 @@ class SegFirewallRule(Resource):
     def __init__(self, res_id=None, name=None):
         super().__init__('segment_firewall_rule', res_id=res_id, name=name)
 
+class IpAM(Resource):
+    def __init__(self, res_id=None, name=None):
+        super().__init__('ipam', res_id=res_id, name=name)
+
 if __name__ == '__main__':
     try:
-        main(sys.argv[1:])
+        main()
     except KeyboardInterrupt:
         pass

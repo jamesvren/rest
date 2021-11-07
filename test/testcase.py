@@ -6,7 +6,18 @@ from resource import *
 
 class TestNetwork(TestBase):
     def test(self):
-        net, _ = self.create()
+        nets = VirtualNetwork().list()
+        for net in nets:
+            print('handle %s ...' % net['name'])
+            if 'AUTO' not in net['name']:
+                continue
+            port = Port()
+            port.filters['network_id'] = [net['id']]
+            ports = port.list()
+            for pt in ports:
+                Port(id=pt['id']).delete()
+            VirtualNetwork(id=net['id']).delete()
+        #net, _ = self.create()
 
     def create(self, name=None, external=False, segment=None, provider='self', prefixs=[]):
         if not name:
@@ -23,8 +34,8 @@ class TestNetwork(TestBase):
             subnet = Subnet(network=net.id, name=net.name)
             subnet.cidr = prefix
             res = subnet.create()
-            if res.get('cidr') != prefix:
-                print('Error: Failed to create subnet {prefix}')
+            if not res or res.get('cidr') != prefix:
+                print(f'Error: Failed to create subnet {prefix} in net {net.name}:{net.id}')
         res = net.show()
         return net, res
 
@@ -41,7 +52,7 @@ class TestSubnet(TestBase):
         subnet.cidr = self.res_prefix
         res = subnet.create()
         if res.get('cidr') != self.res_prefix:
-            print('Failed to create subnet')
+            print(f'Failed to create subnet {self.res_prefix} in {name}:{net_id}')
             return
         return subnet, res
 
@@ -82,5 +93,42 @@ class TestRouter(TestBase):
         pub_net, _ = TestNetwork(self.T).create(external=True, segment=88 + int(self.T), prefixs=[self.res_prefix])
         router.net = pub_net.id
         res = router.update()
+        port = Port()
+        port.filters['device_id'] = [router.id]
+        port.filters['network_id'] = [pub_net.id]
+        res = port.list()
+        tm = time.time()
+        while not res:
+            res = port.list()
+        print(f'!!! spend {int(time.time()-tm)}s/{int(time.time()-tm)/60}m to get port')
+        router.gateway = None
+        res = router.update()
         return router, res
 
+class TestVPN(TestBase):
+    def test(self):
+        router, _ = self.create()
+        router, res = self.update(router)
+        router.delete()
+
+    def create(self, name=None):
+        if not name:
+            name = self.res_name
+        router = Router(name=name)
+        res = router.create()
+        return router, res
+
+    def update(self, router):
+        net, res = TestNetwork(self.T).create(external=False, prefixs=[self.res_prefix])
+        subnet_id = res['subnets'][0]
+        router.subnet = subnet_id
+        pub_net, _ = TestNetwork(self.T).create(external=True, segment=88 + int(self.T), prefixs=[self.res_prefix])
+        router.net = pub_net.id
+        res = router.update()
+        port = Port()
+        port.filters['device_id'] = router.id
+        port.filters['network_id'] = net.id
+        res = port.list()
+        while not res:
+            res = port.list()
+        return router, res
