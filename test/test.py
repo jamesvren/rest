@@ -9,24 +9,29 @@ import argparse
 import inspect
 import time
 import sys
+import os
 import signal
+import re
 from resource import ResourceDB
+
+def msg(*args):
+    print(*args)
 
 threads = []
 ctrl_c = False
 key_times = 0
 def key_ctrl_c(sig, frame):
-    print(f'Please wait for last case finished ...(three times to break)')
     global key_times, ctrl_c
     ctrl_c = True
     key_times += 1
-    if key_times == 3:
+    msg(f'Please wait for last case finished ...(three times to break: {key_times} times)')
+    if key_times >= 3:
         try:
             gevent.killall(threads)
         except:
             pass
         finally:
-            print('[**] Break by user. Please clear resource manually.')
+            msg('[**] Break by user. Please clear resource manually.')
             ResourceDB.dump()
             ResourceDB.flush()
 signal.signal(signal.SIGINT, key_ctrl_c)
@@ -34,22 +39,26 @@ signal.signal(signal.SIGINT, key_ctrl_c)
 class Test():
     def __init__(self, clear=False):
         self.clear = clear
+        self.count = 0
         pass
 
     def test(self, class_list, thread):
+        global ctrl_c
         for class_ in class_list:
             start = time.time()
-            print(time.strftime('%H:%M:%S') + f'==>thread {thread}: run {class_}')
+            case = re.search(r'Test[a-zA-Z]*', str(class_)).group()
+            msg(f"    {time.strftime('%H:%M:%S')}==>thread {thread}: run  - '{case}'")
             try:
                 # run the test
                 class_(thread).test()
+            except Exception as e:
+                msg(str(e))
             finally:
                 if self.clear:
                     ResourceDB.clear()
             end = time.time()
             tm = end - start
-            print(time.strftime('%H:%M:%S') + f'==>thread {thread}: done - {class_} - time: {int(tm)}s/{int(tm/60)}m')
-            global ctrl_c
+            msg(f"    {time.strftime('%H:%M:%S')}==>thread {thread}: done - '{case}' - time: {int(tm)}s/{int(tm/60)}m")
             if ctrl_c:
                 return 'Breaked by user'
 
@@ -70,16 +79,19 @@ class Test():
             if not name.startswith('Test') or name == 'TestBase':
                 continue
             name_list.append(name)
-            if not only or  name in only:
+            # form class for only cases and exclude cases
+            if not only or name in only:
                 case_list.append(class_)
             elif exclude and name in exclude:
                 continue
+        # check if cases existed in case file
         diff = set(only + exclude) - set(name_list)
         if diff:
-            print(f'Error: Class {diff} not found in {cases[0]}')
+            msg(f'Error: Class {diff} not found in {cases[0]}')
             return
 
-        print(f'Ready to run cases: {case_list}')
+        self.count += 1
+        msg(f'{self.count} Ready to run cases: {case_list}')
         # run the case in each thread
         global threads
         threads = []
@@ -87,8 +99,20 @@ class Test():
             threads.append(gevent.spawn(self.test, case_list, i + 1))
 
         gevent.joinall(threads)
+        #try:
+        #    gevent.joinall(threads)
+        #except KeyboardInterrupt:
+        #    ctrl_c = True
+        #    ResourceDB.dump()
+        #    msg('[**] Break by user. Please clear resource manually.')
+        #    os.exit()
 
 def run(args):
+    if args.dump:
+        ResourceDB.dump()
+        return
+
+    # clean resources recorded in DB, and clear data in DB
     ResourceDB.load()
     ResourceDB.clearall()
     ResourceDB.flush()
@@ -96,13 +120,13 @@ def run(args):
     if not args.cases:
         return
 
+    # Ready to run the cases
     test = Test(args.clear if args.times==1 else True)
     tm = time.time()
     global ctrl_c
     if args.times == 0:
         # 0 times mean forever
         while args.times == 0 and not ctrl_c:
-            print(f'control c is {ctrl_c}')
             test.run(args.cases, args.parallel)
     else:
         for i in range(args.times):
@@ -110,22 +134,19 @@ def run(args):
                 break
             test.run(args.cases, args.parallel)
     tm = time.time() - tm
-    print(f'[ Total time: {int(tm)}s/{int(tm/60)}m ]')
+    msg(f'[ Total time: {int(tm)}s/{int(tm/60)}m ]')
     ResourceDB.flush()
 
 def main():
     helps = "casefile OR casefile::class,...; casefile::-class,... to exclude cases\n" \
             "For example:\n" \
-            "    ./test.py -c testcase::TestRouter"
+            "    ./test.py -c cases::TestRouter"
     parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter)
-    parser.add_argument('-p', '--parallel', default=1, type=int, help='Parallel number')
+    parser.add_argument('-p', '--parallel', default=1, type=int, help='Parallel number, default is 1')
     parser.add_argument('-t', '--times', default=1, type=int, help='Times the test will be run.\n0 means forever, default is 1')
     parser.add_argument('-c', '--cases', help=helps)
     parser.add_argument('-C', '--clear', action='store_true', help='Clear all resources created during test')
-
-    #if len(sys.argv) < 2:
-    #    parser.print_usage()
-    #    sys.exit(1)
+    parser.add_argument('-d', '--dump', action='store_true', help='show all resources stored in DB (created during test)')
 
     parser.set_defaults(func=run)
     args = parser.parse_args(None if sys.argv[1:] else ['-h'])

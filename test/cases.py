@@ -6,18 +6,24 @@ from resource import *
 
 class TestNetwork(TestBase):
     def test(self):
-        nets = VirtualNetwork().list()
-        for net in nets:
-            print('handle %s ...' % net['name'])
-            if 'AUTO' not in net['name']:
-                continue
-            port = Port()
-            port.filters['network_id'] = [net['id']]
-            ports = port.list()
-            for pt in ports:
-                Port(id=pt['id']).delete()
-            VirtualNetwork(id=net['id']).delete()
-        #net, _ = self.create()
+        #nets = VirtualNetwork().list()
+        #for net in nets:
+        #    print('handle %s ...' % net['name'])
+        #    if 'AUTO' not in net['name']:
+        #        continue
+        #    port = Port()
+        #    port.filters['network_id'] = [net['id']]
+        #    ports = port.list()
+        #    for pt in ports:
+        #        Port(id=pt['id']).delete()
+        #    VirtualNetwork(id=net['id']).delete()
+        ##net, _ = self.create()
+        for i in range(2820, 6000):
+            net = VirtualNetwork(name=self.res_name+str(i))
+            net.create()
+            subnet = Subnet(network=net.id, name=net.name)
+            subnet.cidr=self.res_prefix
+            subnet.create()
 
     def create(self, name=None, external=False, segment=None, provider='self', prefixs=[]):
         if not name:
@@ -41,9 +47,11 @@ class TestNetwork(TestBase):
 
 class TestSubnet(TestBase):
     def test(self):
-        net = VirtualNetwork(name=self.res_name)
-        res = net.create()
-        subnet = self.create(net.id)
+        subnet = Subnet(id='2f7b31a9-4a75-43ae-97d2-18974f45b44c')
+        subnet.show()
+        #net = VirtualNetwork(name=self.res_name)
+        #res = net.create()
+        #subnet = self.create(net.id)
 
     def create(self, net_id, name=None):
         if not name:
@@ -77,6 +85,7 @@ class TestRouter(TestBase):
     def test(self):
         router, _ = self.create()
         router, res = self.update(router)
+        time.sleep(5)
         router.delete()
 
     def create(self, name=None):
@@ -132,3 +141,10 @@ class TestVPN(TestBase):
         while not res:
             res = port.list()
         return router, res
+
+class TestSecurityGroup(TestBase):
+    def test(self):
+        #sg = SecurityGroup(name='allow-all', id='30d8ddf3-d56a-4967-b9dd-ca2045ba79cb')
+        sg = SecurityGroup(name='allow-all')
+        sg.show()
+        gevent.sleep(1)

@@ -37,6 +37,7 @@ class ResourceDB():
                 retry -= 1
                 time.sleep(1)
                 res = obj.delete()
+        # empty list of db
         db.clear()
 
     @classmethod
@@ -52,10 +53,12 @@ class ResourceDB():
             cls.__clear_from_db(db)
 
     @classmethod
-    def dump(cls):
+    def dump(cls, detail=False):
         for db in cls.objs.values():
             for obj in db:
                 print(f'  [cached] {obj.type} -> {obj.name}:{obj.id}')
+                if detail:
+                    print(obj.body)
 
     @classmethod
     def flush(cls):

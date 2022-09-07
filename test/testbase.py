@@ -4,13 +4,25 @@ from abc import abstractmethod, ABCMeta
 
 my = 'james'
 res_name = 'stress_' + my
-res_prefix = '%s.5.5.0/24'
+subnet_prefix = 24
+subnet_base = '1.0.0.0'
+
+def int2ip(num):
+    return '.'.join([str(int(num/(256**i)%256)) for i in range(4)][::-1])
+
+def ip2int(ip):
+    return sum(int(v) * 256 ** (3 - i) for i,v in enumerate(ip.split('.')))
+
+def get_cidr(thread):
+    num = ip2int(subnet_base) * 256 * int(thread)
+    ip = int2ip(num)
+    return f'{ip}/{subnet_prefix}'
 
 class TestBase(metaclass=ABCMeta):
     def __init__(self, thread):
         self.T = str(thread)
         self.res_name = res_name + self.T
-        self.res_prefix = res_prefix % thread
+        self.res_prefix = get_cidr(thread)
         self.objs = []
 
     @abstractmethod

@@ -46,6 +46,7 @@ def DEBUG(*msg):
         print(*msg)
 
 def debug_out(*msg):
+    #enable = True
     enable = False
     if enable:
         print(*msg)
@@ -54,6 +55,8 @@ disable_out = False
 def out(*msg):
     if not disable_out:
         print(*msg)
+
+output_format = 'table'
 
 def main():
     parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter)
@@ -66,6 +69,7 @@ def main():
     parser.add_argument('-i', '--interface', metavar='HOST', nargs='+', help='Get vrouter interface in the host')
     parser.add_argument('--netns', action='store_true', help='Show namespace VM')
     parser.add_argument('--no-output', action='store_true', help='Don not print result')
+    parser.add_argument('--json', action='store_true', help='Print result with json format')
     def cmd_common(args):
         debug_out('cmd_common: ', args)
         if args.token:
@@ -122,10 +126,9 @@ def main():
             api.add_header(config['header'])
         url = api.encode_url(host=config['host'], port=config['port'], uri=config['api'])
         _, result = api.req(config['method'], url, config['body'])
-        if args.no_output:
-            global disable_out
-            disable_out = True
         out(json.dumps(result, indent=4))
+        if isinstance(result, list):
+            print('Total resources: %s' % len(result))
 
     parser.set_defaults(func=cmd_common)
     subparsers = parser.add_subparsers()
@@ -138,6 +141,12 @@ def main():
     if args.debug:
         global debug
         debug = True
+    if args.json:
+        global output_format
+        output_format = 'json'
+    if args.no_output:
+        global disable_out
+        disable_out = True
     debug_out('cmd: ', args)
     args.func(args)
 
@@ -220,10 +229,12 @@ class parser_base():
         self.create_parser.add_argument('--attr', type=json.loads,
                                         help='Add additional attribution to a resource')
         self.create_parser.add_argument('--shared', action='store_true', help='Shared resource')
+        self.create_parser.add_argument('--no-admin', action='store_true', help='Request without admin role')
 
         self.delete_parser = self.operparser.add_parser('delete', help='Delete a resource')
         self.delete_parser.add_argument('--oper', default='delete', help=argparse.SUPPRESS)
         self.delete_parser.add_argument('name', metavar='NAME', help='Name or ID to be deleted')
+        self.delete_parser.add_argument('--no-admin', action='store_true', help='Request without admin role')
 
         self.update_parser = self.operparser.add_parser('update', argument_default=argparse.SUPPRESS, help='Update a resource')
         self.update_parser.add_argument('--oper', default='update', help=argparse.SUPPRESS)
@@ -232,16 +243,21 @@ class parser_base():
                                         help='Json to be add additional attribution to a resource')
         self.update_parser.add_argument('--shared', type=BOOL, help='Shared resource')
         self.update_parser.add_argument('--enabled', type=BOOL)
+        self.update_parser.add_argument('--no-admin', action='store_true', help='Request without admin role')
 
         self.show_parser = self.operparser.add_parser('show', argument_default=argparse.SUPPRESS, help='Show a resource')
         self.show_parser.add_argument('--oper', default='show', help=argparse.SUPPRESS)
         self.show_parser.add_argument('name', metavar='NAME', help='Name or ID to be displayed')
+        self.show_parser.add_argument('--no-admin', action='store_true', help='Request without admin role')
 
         self.list_parser = self.operparser.add_parser('list', argument_default=argparse.SUPPRESS, help='Show all resources of this type')
         self.list_parser.add_argument('--oper', default='list', help=argparse.SUPPRESS)
         self.list_parser.add_argument('--id', nargs='+', help='Filter by id')
         self.list_parser.add_argument('--name', nargs='+', help='Filter by name')
         self.list_parser.add_argument('--filters', type=json.loads)
+        self.list_parser.add_argument('--start', help='Pagition: uuid to be start, leave empty in first require')
+        self.list_parser.add_argument('--count', help='Pagition: how many items should be return')
+        self.list_parser.add_argument('--no-admin', action='store_true', help='Request without admin role')
         self.list_parser.set_defaults(func=self.cmd_list)
 
     def cmd_base(self, args):
@@ -261,6 +277,8 @@ class parser_base():
         if 'id' in args:
             self.res.id = args.id
             self.res.name = args.name
+        if 'no_admin' in args:
+            self.res.context['is_admin'] = False
         if 'attr' in args:
             self.res.resource.update(args.attr)
             #for attr in args.attr:
@@ -270,6 +288,8 @@ class parser_base():
     def cmd_list(self, args):
         debug_out('cmd_list: ', args)
         self.res.oper = OPER[args.oper]
+        if 'no_admin' in args:
+            self.res.context['is_admin'] = False
         if 'net' in args:
             net_id = [self.name_to_id(VirtualNetwork(), net) for net in args.net]
             self.res.filters['network_id'] = net_id
@@ -287,6 +307,10 @@ class parser_base():
             self.res.filters['device_id'] = args.device
         if 'filters' in args:
             self.res.filters = args.filters
+        if 'start' in args:
+            self.res.filters['marker'] = args.start
+        if 'count' in args:
+            self.res.filters['limit'] = args.count
         self.cmd_action()
 
     def cmd_action(self, res=None):
@@ -998,7 +1022,7 @@ class parser_fwrule(parser_base):
         self.create_parser.add_argument('--dest-ip', help='Destination IP to be matched')
         self.create_parser.add_argument('--dest-port', help='Destination port to be matched')
         self.create_parser.add_argument('-p', '--protocol', help='Protocol to be matched')
-        self.create_parser.add_argument('-v', '--version', choices=['v4','v6'])
+        self.create_parser.add_argument('-v', '--version', choices=['4','6'])
         self.create_parser.add_argument('--action', choices=['deny','allow'])
         parser.set_defaults(func=self.cmd_rule)
 
@@ -1144,7 +1168,7 @@ class parser_sgrule(parser_base):
         self.create_parser.add_argument('--priority', help='Priority of this rule')
         self.create_parser.add_argument('-v', '--ethertype', choices=['IPv4', 'IPv6'])
         self.create_parser.add_argument('--enable', type=BOOL)
-        self.create_parser.add_argument('group', help='Security group associated with')
+        self.create_parser.add_argument('--group', help='Security group associated with')
 
         self.update_parser.add_argument('-d', '--direction', choices=['ingress', 'egress'])
         self.update_parser.add_argument('-a', '--action', choices=['accept', 'deny'], nargs='+', help='IP addresses to be ratelimited')
@@ -1172,6 +1196,8 @@ class parser_sgrule(parser_base):
             self.res.resource['ethertype'] = args.ethertype
         if 'enable' in args:
             self.res.resource['enabled'] = args.enable
+        if 'group' in args:
+            self.res.resource['security_group_id'] = self.name_to_id(SecurityGroup(), args.group)
         self.cmd_action()
 
 class parser_provider(parser_base):
@@ -1180,6 +1206,7 @@ class parser_provider(parser_base):
         self.res = Provider()
         self.create_parser.add_argument('-i', '--interfaces', type=kv, metavar='HOST=NIC', nargs='+', help='Interface for public network')
         self.update_parser.add_argument('-i', '--interfaces', type=kv, metavar='HOST=NIC', nargs='+', help='Interface for public network')
+        self.list_parser.add_argument('--nic', action='store_true', help='Show nic status of provider')
         parser.set_defaults(func=self.cmd_provider)
 
     def cmd_provider(self, args):
@@ -1192,6 +1219,10 @@ class parser_provider(parser_base):
                 interfaces.append({'host': i[0], 'nic': i[1]})
             self.res.interfaces = interfaces
         self.cmd_action()
+    def cmd_list(self, args):
+        if 'nic' in args:
+            self.res.url = '/neutron/provider_nic_status'
+        super().cmd_list(args)
 
 class parser_nodes():
     def __init__(self, parser):
@@ -1457,6 +1488,15 @@ class ResourceAction():
         self.res = res_obj
         self.url = self.api.encode_url(uri=res_obj.url)
 
+    def log(self, msg):
+        global format
+        if output_format == 'json':
+            result = json.dumps(msg, indent=4)
+        else:
+            result = Table(4)
+            result.from_json(msg)
+        out(result)
+
     def name_to_id(self, name):
         self.res.filters = { 'name' : name}
         oper = self.res.oper
@@ -1506,29 +1546,23 @@ class ResourceAction():
         if code != 200:
             print(result)
             return
-        table = Table(4)
-        table.from_json(result)
-        print(table)
+        self.log(result)
         if isinstance(result, list):
-            print('Totoal resources: %s' % len(result))
+            print('Total resources: %s' % len(result))
 
     def put(self):
         code, result = self.api.req('put', self.url, self.res.body)
         if code != 200:
             print(result)
             return
-        table = Table(4)
-        table.from_json(result)
-        print(table)
+        self.log(result)
 
     def get(self):
         code, result = self.api.req('get', self.url, self.res.body)
         if code != 200:
             print(result)
             return
-        table = Table(4)
-        table.from_json(result)
-        print(table)
+        self.log(result)
 
     def delete(self):
         code, result = self.api.req('delete', self.url, self.res.body)
@@ -1630,7 +1664,7 @@ class RestAPI():
             return None
 
         if method == 'get':
-            DEBUG('\ncurl -X GET %s %s | python -m json.tool\n' % (url, header_str))
+            DEBUG('\ncurl -X GET "%s" %s | python -m json.tool\n' % (url, header_str))
         else:
             DEBUG("\ncurl -X %s %s %s-d '%s' | python -m json.tool\n" % (method.upper(), url, header_str, data))
 
@@ -1642,10 +1676,12 @@ class RestAPI():
         DEBUG(res.status_code, 'length:', len(res.content), 'time:', time.time()-tm)
         if res.text:
             try:
-                DEBUG(json.dumps(res.json()))
+                if not disable_out:
+                    DEBUG(json.dumps(res.json()))
                 return res.status_code, res.json()
             except:
-                DEBUG(res.text)
+                if not disable_out:
+                    DEBUG(res.text)
                 return res.status_code, res.text
         else:
             return res.status_code, []

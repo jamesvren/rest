@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 # -*- coding:utf-8 -*-
-from testcase import *
+from cases import *
 import re
 
 class TestClearAll(TestBase):
