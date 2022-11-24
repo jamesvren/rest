@@ -9,6 +9,8 @@ import requests
 import argparse
 import time
 import gevent
+import asyncio
+import aiohttp
 from testbase import DEBUG
 from db import ResourceDB
 
@@ -27,6 +29,7 @@ class RestAPI():
         self.token = ''
         self.host = None
         self.port = None
+
 
     def add_header(self, header):
         self.headers.update(header)

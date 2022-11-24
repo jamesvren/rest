@@ -12,7 +12,7 @@ import sys
 import os
 import signal
 import re
-from resource import ResourceDB
+from resource import ResourceDB, pasrse_config_file
 
 def msg(*args):
     print(*args)
@@ -96,18 +96,15 @@ class Test():
         global threads
         threads = []
         for i in range(thread_num):
-            threads.append(gevent.spawn(self.test, case_list, i + 1))
+            gid = gevent.spawn(self.test, case_list, i + 1)
+            ResourceDB.tasks[id(gid)] = i + 1
+            threads.append(gid)
 
         gevent.joinall(threads)
-        #try:
-        #    gevent.joinall(threads)
-        #except KeyboardInterrupt:
-        #    ctrl_c = True
-        #    ResourceDB.dump()
-        #    msg('[**] Break by user. Please clear resource manually.')
-        #    os.exit()
 
 def run(args):
+    auth = pasrse_config_file()
+    print(f"Run testcases in host: {auth['host']}")
     if args.dump:
         ResourceDB.dump()
         return

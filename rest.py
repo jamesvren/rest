@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 import uuid
 import json
@@ -33,6 +33,7 @@ features = {
     'floatingip': 'Floating IP',
     'provider': 'Public Network Provider',
     'nodes': 'SDN Nodes',
+    'node': 'SDN Nodes info',
     'tag': 'Tag',
     'address-group': 'Address Group',
     'service-group': 'Service Group',
@@ -74,7 +75,8 @@ def main():
         debug_out('cmd_common: ', args)
         if args.token:
             config = pasrse_config_file()
-            api = RestAPI(config['auth_host'], config['auth_port'], config['version'], config['user'], config['password'], config['project'])
+            api = RestAPI(auth_host=config['auth_host'], auth_port=config['auth_port'], version=config['version'],
+                          user=config['user'], password=config['password'], project=config['project'])
             token = api.get_token()
             out(token)
             return
@@ -121,7 +123,8 @@ def main():
             parser.print_usage()
             return
         config = pasrse_config_file(args.file)
-        api = RestAPI(config['auth_host'], config['auth_port'], config['version'], config['user'], config['password'], config['project'])
+        api = RestAPI(auth_host=config['auth_host'], auth_port=config['auth_port'], version=config['version'],
+                      user=config['user'], password=config['password'], project=config['project'])
         if 'header' in config:
             api.add_header(config['header'])
         url = api.encode_url(host=config['host'], port=config['port'], uri=config['api'])
@@ -1275,6 +1278,11 @@ class parser_nodes():
         self.action.set_res(self.res)
         self.action.delete()
 
+class parser_node(parser_base):
+    def __init__(self, parser):
+        super().__init__(parser)
+        self.res = Node()
+
 class parser_prouter(parser_base):
     def __init__(self, parser):
         super().__init__(parser)
@@ -1481,7 +1489,8 @@ class ResourceAction():
 
         self.host = config['host']
         self.port = config['port']
-        self.api = RestAPI(config['auth_host'], config['auth_port'], config['version'], config['user'], config['password'], config['project'])
+        self.api = RestAPI(auth_host=config['auth_host'], auth_port=config['auth_port'], version=config['version'],
+                           user=config['user'], password=config['password'], project=config['project'])
         self.url = self.api.encode_url(host=self.host, port=self.port, uri=res_obj.url)
 
     def set_res(self, res_obj):
@@ -1571,8 +1580,8 @@ class ResourceAction():
 
 # Rest API tools for all kinds of resources
 class RestAPI():
-    def __init__(self, auth_host, auth_port='35357', version='v2', user='ArcherAdmin',
-                 password='ArcherAdmin', project='ArcherAdmin', domain='Default'):
+    def __init__(self, auth_host, auth_port='35357', host=None, port=None, version='v2', user='ArcherAdmin',
+                 password='ArcherAdmin@123', project='ArcherAdmin', domain='Default'):
         self.auth_host = auth_host
         self.auth_port = auth_port
         self.version = version
@@ -1582,8 +1591,8 @@ class RestAPI():
         self.domain = domain
         self.headers = {'Content-Type': 'application/json'}
         self.token = ''
-        self.host = None
-        self.port = None
+        self.host = host
+        self.port = port
 
     def add_header(self, header):
         self.headers.update(header)
@@ -1673,7 +1682,7 @@ class RestAPI():
             res = oper[method](url, data=data, headers=self.headers)
         except Exception as e:
             return 500, str(e)
-        DEBUG(res.status_code, 'length:', len(res.content), 'time:', time.time()-tm)
+        print(res.status_code, 'length:', len(res.content), 'time:', time.time()-tm)
         if res.text:
             try:
                 if not disable_out:
@@ -1736,7 +1745,7 @@ class Table():
                 pretty = '{0}{1}{2:<{len}}|'.format(pretty, ' '*self.indent, self.column[j][i],
                                                     len=len(max_item) + self.indent)
                 if len(head) != total:
-                    head = f"{head}{'-'*(len(max_item)+self.indent*2)}+"
+                    head = "{0}{1}+".format(head, '-'*(len(max_item)+self.indent*2))
             total = len(pretty)
             self.pretty.append(pretty)
         self.table =  '\n'.join([self.table, head, '\n'.join(self.pretty), head])
@@ -2710,6 +2719,10 @@ class SegFirewallRule(Resource):
 class IpAM(Resource):
     def __init__(self, res_id=None, name=None):
         super().__init__('ipam', res_id=res_id, name=name)
+
+class Node(Resource):
+    def __init__(self, res_id=None, name=None):
+        super().__init__('node', res_id=res_id, name=name)
 
 if __name__ == '__main__':
     try:

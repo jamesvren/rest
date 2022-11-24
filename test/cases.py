@@ -4,28 +4,20 @@
 from testbase import TestBase
 from resource import *
 
+class TestCases(TestBase):
+    def test(self):
+        net, _ = TestNetwork(self.T).create()
+        TestSubnet(self.T).create(net.id)
+        router = TestRouter(self.T).create()
+
 class TestNetwork(TestBase):
     def test(self):
-        #nets = VirtualNetwork().list()
-        #for net in nets:
-        #    print('handle %s ...' % net['name'])
-        #    if 'AUTO' not in net['name']:
-        #        continue
-        #    port = Port()
-        #    port.filters['network_id'] = [net['id']]
-        #    ports = port.list()
-        #    for pt in ports:
-        #        Port(id=pt['id']).delete()
-        #    VirtualNetwork(id=net['id']).delete()
-        ##net, _ = self.create()
-        for i in range(2820, 6000):
-            net = VirtualNetwork(name=self.res_name+str(i))
-            net.create()
-            subnet = Subnet(network=net.id, name=net.name)
-            subnet.cidr=self.res_prefix
-            subnet.create()
+        # create private network
+        net, _ = self.create()
+        self.create_subnet(net)
+        # create public network
 
-    def create(self, name=None, external=False, segment=None, provider='self', prefixs=[]):
+    def create(self, name=None, external=False, segment=None, provider='self'):
         if not name:
             name = self.res_name
         if external:
@@ -36,14 +28,20 @@ class TestNetwork(TestBase):
         if segment:
             net.segment = segment
         res = net.create()
+        #res = net.show()
+        return net, res
+
+    def create_subnet(net, prefixs=[]):
+        subnets = []
         for prefix in prefixs:
             subnet = Subnet(network=net.id, name=net.name)
             subnet.cidr = prefix
             res = subnet.create()
             if not res or res.get('cidr') != prefix:
                 print(f'Error: Failed to create subnet {prefix} in net {net.name}:{net.id}')
-        res = net.show()
-        return net, res
+            else:
+                subnets.append(subnet)
+        return subnets
 
 class TestSubnet(TestBase):
     def test(self):
@@ -59,9 +57,9 @@ class TestSubnet(TestBase):
         subnet = Subnet(network=net_id, name=name)
         subnet.cidr = self.res_prefix
         res = subnet.create()
-        if res.get('cidr') != self.res_prefix:
-            print(f'Failed to create subnet {self.res_prefix} in {name}:{net_id}')
-            return
+        #if res.get('cidr') != self.res_prefix:
+        #    print(f'Failed to create subnet {self.res_prefix} in {name}:{net_id}')
+        #    return
         return subnet, res
 
 class TestPort(TestBase):
@@ -84,9 +82,9 @@ class TestPort(TestBase):
 class TestRouter(TestBase):
     def test(self):
         router, _ = self.create()
-        router, res = self.update(router)
-        time.sleep(5)
-        router.delete()
+        #router, res = self.update(router)
+        #time.sleep(5)
+        #router.delete()
 
     def create(self, name=None):
         if not name:
@@ -146,5 +144,9 @@ class TestSecurityGroup(TestBase):
     def test(self):
         #sg = SecurityGroup(name='allow-all', id='30d8ddf3-d56a-4967-b9dd-ca2045ba79cb')
         sg = SecurityGroup(name='allow-all')
-        sg.show()
         gevent.sleep(1)
+
+class TestIpGroup(TestBase):
+    def test(self):
+        ipg = IpGroup(self.res_name)
+        print(ipg.list())
