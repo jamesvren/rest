@@ -1,4 +1,5 @@
-__pycache__/
-test/__pycache__/
+**/__pycache__
 test/res.db
 auth.json
+**/log
+*/*.log

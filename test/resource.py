@@ -5,13 +5,11 @@ import json
 import sys
 import os
 import re
-import requests
 import argparse
 import time
-import gevent
 import asyncio
 import aiohttp
-from testbase import DEBUG
+from testbase import LOG
 from db import ResourceDB
 
 # Rest API tools for all kinds of resources
@@ -34,7 +32,7 @@ class RestAPI():
     def add_header(self, header):
         self.headers.update(header)
 
-    def get_token(self):
+    async def get_token(self):
         if self.version == 'v3':
             auth_url = 'http://%s:%s/v3/auth/tokens' % (self.auth_host, self.auth_port)
             body = { 'auth': {
@@ -73,31 +71,26 @@ class RestAPI():
             }
         header = {'Content-Type': 'application/json'}
         header_str = '-H "Content-Type:application/json" '
-        DEBUG('rest', "curl -X POST %s %s-d '%s'" % (auth_url, header_str, json.dumps(body)))
+        LOG('debug', 'rest', "curl -X POST {} {}-d '{}'".format(auth_url, header_str, json.dumps(body)))
         try:
-            res = requests.post(auth_url, data=json.dumps(body), headers=header)
+            async with aiohttp.request('POST', auth_url, data=json.dumps(body), headers=header) as resp:
+                if resp.status == 401:
+                    return None
+                if (self.version == 'v2'):
+                    token = await resp.json()
+                    self.token = token['access']['token']['id']
+                else:
+                    self.token = resp.headers['x-subject-token']
         except Exception as e:
             print(str(e))
             return None
-        if res.status_code == 401:
-            return None
-        if (self.version == 'v2'):
-            token = json.loads(res.text)
-            self.token = token['access']['token']['id']
-        else:
-            self.token = res.headers['x-subject-token']
+
         self.headers['X-Auth-Token'] = self.token
         return self.token
 
-    def req(self, method, url, body=None):
-        oper = {
-            'get': requests.get,
-            'post': requests.post,
-            'put': requests.put,
-            'delete': requests.delete
-        }
+    async def req(self, method, url, body=None):
         if not self.token:
-            self.get_token()
+            await self.get_token()
         self.headers['X-Auth-Token'] = self.token
         data = json.dumps(body) if body else None
 
@@ -105,30 +98,25 @@ class RestAPI():
         for (key,value) in self.headers.items():
             header_str += '-H "%s:%s" ' % (key, value)
 
-        if method not in oper.keys():
-            print ('Error: not supported rest method (%s)' % method)
-            return None
-
         if method == 'get':
-            DEBUG('rest', '\ncurl -X GET %s %s | python -m json.tool\n' % (url, header_str))
+            LOG('debug', 'rest', '\ncurl -X GET {} {} | python -m json.tool\n'.format(url, header_str))
         else:
-            DEBUG('rest', "\ncurl -X %s %s %s-d '%s' | python -m json.tool\n" % (method.upper(), url, header_str, data))
+            LOG('debug', 'rest', "\ncurl -X {} {} {}-d '{}' | python -m json.tool\n".format(method.upper(), url, header_str, data))
 
         tm = time.time()
         try:
-            res = oper[method](url, data=data, headers=self.headers)
+            async with aiohttp.request(method=method, url=url, data=data, headers=self.headers) as resp:
+                length = resp.content_length
+                status = resp.status
+                content = []
+                if resp.content_type == 'text/html':
+                    content = await resp.text(encoding="utf-8")
+                elif resp.content_type == 'application/json':
+                    content = await resp.json()
         except Exception as e:
             return 500, str(e)
-        DEBUG('rest', res.status_code, 'length:', len(res.content), 'time:', time.time()-tm)
-        if res.text:
-            try:
-                DEBUG('rest', json.dumps(res.json()))
-                return res.status_code, res.json()
-            except:
-                DEBUG('rest', res.text)
-                return res.status_code, res.text
-        else:
-            return res.status_code, []
+        LOG('debug', 'rest', f'{status}, length: {length}, time: {time.time()-tm}')
+        return status, content
 
     def encode_url(self, uri, host=None, port=None, api_version=None):
         if not host:
@@ -194,22 +182,22 @@ class ResourceAction():
         if res_obj:
             self.url = self.api.encode_url(host=self.host, port=self.port, uri=res_obj.url)
 
-    def post(self):
+    async def post(self):
         self.err = None
-        code, result = self.api.req('post', self.url, self.res.body)
+        code, result = await self.api.req('post', self.url, self.res.body)
         if code != 200:
             print(code, result)
             self.err = result
             return None
         return result
 
-    def name_to_id(self, res_type, name):
+    async def name_to_id(self, res_type, name):
         res_obj = Resource(res_type)
         res_obj.filters = { 'name' : name}
         res_obj.oper = 'READALL'
         res_id = []
 
-        code, resources = self.api.req('post', self.api.encode_url(uri=res_obj.url), res_obj.body)
+        code, resources = await self.api.req('post', self.api.encode_url(uri=res_obj.url), res_obj.body)
         if code != 200:
             raise Exception('Not able to get resource')
         for res in resources:
@@ -229,25 +217,25 @@ class ResourceAction():
             raise Exception('Error: %s %s Not Found' % (self.res.type, name))
         return res_id[idx][0]
 
-    def fqname_to_id(self, res_type, fqname):
+    async def fqname_to_id(self, res_type, fqname):
         json_body = {'type': res_type, 'fq_name': fqname}
         url = self.api.encode_url('/fqname-to-id')
-        code, ret = self.api.req('post', url, json_body)
+        code, ret = await self.api.req('post', url, json_body)
         if code != 200:
             print(ret)
             return None
         return ret
 
 def save(func):
-    def wrapper(obj, *args, **kwargs):
-        r = func(obj, *args, **kwargs)
+    async def wrapper(obj, *args, **kwargs):
+        r = await func(obj, *args, **kwargs)
         ResourceDB.insert(obj)
         return r
     return wrapper
 
 def remove(func):
-    def wrapper(obj, *args, **kwargs):
-        r = func(obj, *args, **kwargs)
+    async def wrapper(obj, *args, **kwargs):
+        r = await func(obj, *args, **kwargs)
         ResourceDB.remove(obj)
         return r
     return wrapper
@@ -285,39 +273,39 @@ class Resource():
 
         self.action = ResourceAction(self)
 
-    def _check_id(self):
+    async def _check_id(self):
         if not self.id and not self.name:
             raise Exception('Missing resurce name or id')
         if not self.id:
-            self.id = self.action.name_to_id(self.type, self.name)
+            self.id = await self.action.name_to_id(self.type, self.name)
 
     @save
-    def create(self):
+    async def create(self):
         self.context['operation'] = 'CREATE'
-        res = self.action.post()
+        res = await self.action.post()
         if res:
             self.id = res['id']
         return res
 
     @remove
-    def delete(self):
-        self._check_id()
+    async def delete(self):
+        await self._check_id()
         self.context['operation'] = 'DELETE'
-        return self.action.post()
+        return await self.action.post()
 
-    def update(self):
-        self._check_id()
+    async def update(self):
+        await self._check_id()
         self.context['operation'] = 'UPDATE'
-        return self.action.post()
+        return await self.action.post()
 
-    def show(self):
-        self._check_id()
+    async def show(self):
+        await self._check_id()
         self.context['operation'] = 'READ'
-        return self.action.post()
+        return await self.action.post()
 
-    def list(self):
+    async def list(self):
         self.context['operation'] = 'READALL'
-        return self.action.post()
+        return await self.action.post()
 
     def raise_e(self, msg, res=None):
         msg = f'[{self.type}:{self.oper}] {msg}'
