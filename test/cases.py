@@ -6,9 +6,9 @@ from resource import *
 
 class TestCases(TestBase):
     async def test(self):
-        net, _ = await TestNetwork(self.T, self.rounds).create()
+        net, _ = await TestNetwork(self.T, self.rounds).create(external=True)
         await TestSubnet(self.T, self.rounds).create(net.id)
-        router = await TestRouter(self.T, self.rounds).create()
+        #router = await TestRouter(self.T, self.rounds).create()
 
 class TestNetwork(TestBase):
     async def test(self):
@@ -27,6 +27,8 @@ class TestNetwork(TestBase):
         net.external = external
         if segment:
             net.segment = segment
+        else:
+            net.segment = self.vlan
         res = await net.create()
         #res = net.show()
         return net, res

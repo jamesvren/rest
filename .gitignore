@@ -3,3 +3,4 @@ test/res.db
 auth.json
 **/log
 */*.log
+*/*.swp
