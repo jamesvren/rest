@@ -144,7 +144,7 @@ def main():
     parser.add_argument('-c', '--cases', help=helps)
     parser.add_argument('-C', '--clear', action='store_true', help='Clear all resources created during test')
     parser.add_argument('-d', '--dump', action='store_true', help='show all resources stored in DB (created during test)')
-    parser.add_argument('-r', '--rn', action='store_true', help='Add prefix in resource name for each round')
+    parser.add_argument('-n', '--rn', action='store_true', help='Add prefix in resource name for each round')
 
     parser.set_defaults(func=run)
     args = parser.parse_args(None if sys.argv[1:] else ['-h'])

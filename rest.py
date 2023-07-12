@@ -653,6 +653,8 @@ class parser_listener(parser_base):
         self.create_parser.add_argument('--port', required=True, help='Protocol port to listen')
         self.create_parser.add_argument('-p', '--protocol', required=True, help='Protocol to listen',
                                         choices=['udp', 'tcp', 'http', 'https', 'terminated_https'])
+        self.create_parser.add_argument('-c', '--cert', help='Default cert ref for https')
+        self.create_parser.add_argument('--certs', nargs='+', help='Cert refs for https')
         parser.set_defaults(func=self.cmd_listener)
 
     def cmd_listener(self, args):
@@ -664,6 +666,10 @@ class parser_listener(parser_base):
             self.res.protocol = args.protocol.upper()
         if 'lb' in args:
             self.res.lb= self.name_to_id(LoadBalancer(), args.lb)
+        if 'cert' in args:
+            self.res.resource['default_tls_container_ref'] = args.cert
+        if 'certs' in args:
+            self.res.resource['sni_container_refs'] = args.certs
         self.cmd_action()
 
 class parser_pool(parser_base):
@@ -1757,7 +1763,7 @@ def read_comment_json(file):
     text = ''
     with open(file, 'r') as f:
         all_lines = f.readlines()
-    comment = re.compile('\s*#')
+    comment = re.compile('\s*//')
     for line in all_lines:
         if not re.match(comment, line):
             text += line

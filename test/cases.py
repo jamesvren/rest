@@ -6,7 +6,8 @@ from resource import *
 
 class TestCases(TestBase):
     async def test(self):
-        net, _ = await TestNetwork(self.T, self.rounds).create(external=True)
+        #net, _ = await TestNetwork(self.T, self.rounds).create(external=True)
+        net, _ = await TestNetwork(self.T, self.rounds).create()
         await TestSubnet(self.T, self.rounds).create(net.id)
         #router = await TestRouter(self.T, self.rounds).create()
 
@@ -67,13 +68,14 @@ class TestSubnet(TestBase):
 class TestPort(TestBase):
     async def test(self):
         port, _ = await self.create()
-        await port.show()
+        #await port.show()
         #port.list()
 
     async def create(self, name=None):
         if not name:
             name = self.res_name
-        net, _ = await TestNetwork(self.T, self.rounds).create(external=False, prefixs=[self.res_prefix])
+        net, _ = await TestNetwork(self.T, self.rounds).create()
+        await TestSubnet(self.T, self.rounds).create(net.id)
         port = Port(name=name)
         port.net = net.id
         res = await port.create()
@@ -84,9 +86,9 @@ class TestPort(TestBase):
 class TestRouter(TestBase):
     async def test(self):
         router, _ = await self.create()
-        #router, res = self.update(router)
+        router, res = await self.update(router)
         #time.sleep(5)
-        #router.delete()
+        await router.delete()
 
     async def create(self, name=None):
         if not name:
@@ -96,22 +98,24 @@ class TestRouter(TestBase):
         return router, res
 
     async def update(self, router):
-        net, res = await TestNetwork(self.T, self.rounds).create(external=False, prefixs=[self.res_prefix])
-        subnet_id = res['subnets'][0]
-        router.subnet = subnet_id
-        pub_net, _ = await TestNetwork(self.T, self.rounds).create(external=True, segment=88 + int(self.T), prefixs=[self.res_prefix])
+        #net, _ = await TestNetwork(self.T, self.rounds).create()
+        #subnet, _ = await TestSubnet(self.T, self.rounds).create(net.id)
+        #router.subnet = subnet.id
+        pub_net, _ = await TestNetwork(self.T, self.rounds).create(external=True)
+        subnet, _ = await TestSubnet(self.T, self.rounds).create(pub_net.id)
         router.net = pub_net.id
         res = await router.update()
-        port = Port()
-        port.filters['device_id'] = [router.id]
-        port.filters['network_id'] = [pub_net.id]
-        res = await port.list()
-        tm = time.time()
-        while not res:
-            res = await port.list()
-        print(f'!!! spend {int(time.time()-tm)}s/{int(time.time()-tm)/60}m to get port')
+        #port = Port()
+        #port.filters['device_id'] = [router.id]
+        #port.filters['network_id'] = [pub_net.id]
+        #res = await port.list()
+        #tm = time.time()
+        #while not res:
+        #    res = await port.list()
+        #print(f'!!! spend {int(time.time()-tm)}s/{int(time.time()-tm)/60}m to get port')
         router.gateway = None
         res = await router.update()
+        await pub_net.delete()
         return router, res
 
 class TestVPN(TestBase):
