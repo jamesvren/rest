@@ -94,7 +94,7 @@ def main():
                 print('File already exist')
                 return
             with open(auth_file, 'w') as f:
-                f.write('#support line comment\n')
+                f.write('//support line comment\n')
                 f.write(json.dumps({
                         'user': 'ArcherAdmin',
                         'password': password,
@@ -105,10 +105,10 @@ def main():
             with open(example_file, 'w') as ef:
                 text = []
                 text.append('{')
-                text.append('#"user": "ArcherAdmin",')
-                text.append('#"password": "%s",' % password)
-                text.append('#"project": "ArcherAdmin",')
-                text.append('#"auth_host": "%s",' % auth_host)
+                text.append('//"user": "ArcherAdmin",')
+                text.append('//"password": "%s",' % password)
+                text.append('//"project": "ArcherAdmin",')
+                text.append('//"auth_host": "%s",' % auth_host)
                 text.append('"host": "%s",' % auth_host)
                 text.append('"port": "8082",')
                 text.append('"api": "/",')
@@ -222,6 +222,7 @@ class parser_base():
         self.oper = 'list'
         self.res = None
         self.action = None
+        self.args = []
 
         self.parser = parser
         self.operparser = parser.add_subparsers()
@@ -261,9 +262,11 @@ class parser_base():
         self.list_parser.add_argument('--start', help='Pagition: uuid to be start, leave empty in first require')
         self.list_parser.add_argument('--count', help='Pagition: how many items should be return')
         self.list_parser.add_argument('--no-admin', action='store_true', help='Request without admin role')
+        self.list_parser.add_argument('-F', '--field', nargs='+', help='Fields to display')
         self.list_parser.set_defaults(func=self.cmd_list)
 
     def cmd_base(self, args):
+        self.args = args
         if 'shared' in args:
             self.res.shared = args.shared
         if 'enabled' in args:
@@ -290,6 +293,7 @@ class parser_base():
 
     def cmd_list(self, args):
         debug_out('cmd_list: ', args)
+        self.args = args
         self.res.oper = OPER[args.oper]
         if 'no_admin' in args:
             self.res.context['is_admin'] = False
@@ -322,6 +326,8 @@ class parser_base():
             self.action.set_res(action_res)
         else:
             self.action = ResourceAction(action_res)
+        if 'field' in self.args:
+            self.action.fields = self.args.field
         self.action.post()
 
     def name_to_id(self, res, name):
@@ -1488,6 +1494,7 @@ class parser_seg_fwrule(parser_base):
 class ResourceAction():
     def __init__(self, res_obj):
         self.res = res_obj
+        self.fields = []
 
         config = pasrse_config_file()
         if not config:
@@ -1508,7 +1515,7 @@ class ResourceAction():
         if output_format == 'json':
             result = json.dumps(msg, indent=4)
         else:
-            result = Table(4)
+            result = Table(4, self.fields)
             result.from_json(msg)
         out(result)
 
@@ -1716,18 +1723,30 @@ class RestAPI():
             return 'http://%s:%s/%s%s' % (host, port, api_version, uri)
 
 class Table():
-    def __init__(self, indent=0):
+    def __init__(self, indent=0, fields=[]):
         self.column = []
         self.raw = []
         self.pretty = []
         self.indent = indent
         self.table = ''
+        self.fields = fields
     def add_column(self, column):
         col = [ str(i) for i in column ]
         self.column.append(col)
     def from_json(self, json):
         if isinstance(json, list):
             # multi table
+            if self.fields:
+                for f in self.fields:
+                    column = []
+                    # add header
+                    column.append(f)
+                    # add data
+                    for item in json:
+                        column.append(item.get(f))
+                    self.add_column(column)
+                self._form_table()
+                return
             for item in json:
                 self.column = []
                 self.add_column(list(item.keys()))

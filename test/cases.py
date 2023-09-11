@@ -28,7 +28,7 @@ class TestNetwork(TestBase):
         net.external = external
         if segment:
             net.segment = segment
-        else:
+        elif external:
             net.segment = self.vlan
         res = await net.create()
         #res = net.show()
@@ -69,7 +69,8 @@ class TestPort(TestBase):
     async def test(self):
         port, _ = await self.create()
         #await port.show()
-        #port.list()
+        await port.list()
+        await port.delete()
 
     async def create(self, name=None):
         if not name:
