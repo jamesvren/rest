@@ -8,14 +8,16 @@ class TestCases(TestBase):
     async def test(self):
         #net, _ = await TestNetwork(self.T, self.rounds).create(external=True)
         net, _ = await TestNetwork(self.T, self.rounds).create()
-        await TestSubnet(self.T, self.rounds).create(net.id)
+        subnet, _ = await TestSubnet(self.T, self.rounds).create(net.id)
+        time.sleep(1)
+        await subnet.delete()
         #router = await TestRouter(self.T, self.rounds).create()
 
 class TestNetwork(TestBase):
     async def test(self):
         # create private network
         net, _ = await self.create()
-        await self.create_subnet(net)
+        subnets = await self.create_subnet(net)
         # create public network
 
     async def create(self, name=None, external=False, segment=None, provider='self'):
@@ -34,7 +36,7 @@ class TestNetwork(TestBase):
         #res = net.show()
         return net, res
 
-    async def create_subnet(net, prefixs=[]):
+    async def create_subnet(self, net, prefixs=[]):
         subnets = []
         for prefix in prefixs:
             subnet = Subnet(network=net.id, name=net.name)
@@ -44,6 +46,9 @@ class TestNetwork(TestBase):
                 print(f'Error: Failed to create subnet {prefix} in net {net.name}:{net.id}')
             else:
                 subnets.append(subnet)
+        else:
+            subnet, _ = await TestSubnet(self.T, self.rounds).create(net.id)
+            subnets.append(subnet)
         return subnets
 
 class TestSubnet(TestBase):

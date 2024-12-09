@@ -265,7 +265,8 @@ class Resource():
             'user_id': '44faef681cd34e1c80b8520dd6aebad4',
             'tenant_id': 'ad88dd5d24ce4e2189a6ae7491c33e9d',
             'is_admin': True,
-            'request_id': 'req-' + str(uuid.uuid1()),
+            #'request_id': 'req-' + str(uuid.uuid1()),
+            'request_id': 'req-test',
             'operation': 'READALL',
             'type': self.type
         }
